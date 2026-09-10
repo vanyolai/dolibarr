@@ -78,7 +78,7 @@ if ($resolvedId > 0) {
 	if ($linkId > 0) {
 		$link = new Link($db);
 		if ($link->fetch($linkId) > 0 && (int) $link->entity === (int) $conf->entity && strpos((string) $link->url, $taskId) !== false) {
-			$link->url = dol_buildpath('/paperless/open.php', 1).'?document='.$resolvedId;
+			$link->url = dol_buildpath('/paperless/open.php', 2).'?document='.$resolvedId;
 			$link->update($user, 0);
 		}
 	}
