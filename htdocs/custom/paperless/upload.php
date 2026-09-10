@@ -158,6 +158,7 @@ if (empty($filesToUpload)) {
 $apiUrl = trim(getDolGlobalString('PAPERLESS_API_URL'));
 $webUrl = trim(getDolGlobalString('PAPERLESS_WEB_URL'));
 $apiToken = trim(getDolGlobalString('PAPERLESS_API_TOKEN'));
+$tagName = trim(getDolGlobalString('PAPERLESS_TAG_NAME'));
 $httpTimeout = max(1, getDolGlobalInt('PAPERLESS_HTTP_TIMEOUT', 30));
 if ($apiUrl === '' || $apiToken === '') {
 	setEventMessages($langs->trans('PaperlessNotConfigured'), null, 'errors');
@@ -170,11 +171,21 @@ require_once DOL_DOCUMENT_ROOT.'/core/class/link.class.php';
 $client = new PaperlessClient($apiUrl, $apiToken, $webUrl, $httpTimeout);
 $resolverBase = dol_buildpath('/paperless/open.php', 2);
 $successCount = 0;
+$tagId = 0;
+
+if ($tagName !== '') {
+	$resolvedTagId = $client->getOrCreateTagId($tagName);
+	if ($resolvedTagId === false) {
+		setEventMessages($langs->trans('PaperlessTagUnavailable', $tagName, $client->error), null, 'warnings');
+	} else {
+		$tagId = (int) $resolvedTagId;
+	}
+}
 
 foreach ($filesToUpload as $file) {
 	$filename = (string) $file['sanitized_name'];
 	$title = pathinfo($filename, PATHINFO_FILENAME);
-	$taskId = $client->uploadDocument((string) $file['tmp_name'], $filename, $title);
+	$taskId = $client->uploadDocument((string) $file['tmp_name'], $filename, $title, $tagId);
 	if ($taskId === false) {
 		setEventMessages($langs->trans('PaperlessUploadFailed', $filename, $client->error), null, 'errors');
 		continue;
@@ -200,5 +211,5 @@ foreach ($filesToUpload as $file) {
 	setEventMessages($langs->trans('PaperlessUploadQueued', $filename), null, 'mesgs');
 }
 
-dol_syslog('Paperless upload endpoint uploaded='.$successCount.' objecttype='.$objectType.' objectid='.$objectId, LOG_INFO);
+dol_syslog('Paperless upload endpoint uploaded='.$successCount.' objecttype='.$objectType.' objectid='.$objectId.' tag='.(string) $tagName.' tagid='.(int) $tagId, LOG_INFO);
 paperlessRedirectBack($returnUri);
