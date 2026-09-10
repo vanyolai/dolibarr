@@ -49,6 +49,11 @@ $item->setAsSecureKey();
 $item->cssClass = 'minwidth500';
 $item->helpText = $langs->trans('PAPERLESS_API_TOKEN_HELP');
 
+$item = $formSetup->newItem('PAPERLESS_TAG_NAME');
+$item->fieldAttr['placeholder'] = 'dolibarr';
+$item->cssClass = 'minwidth300';
+$item->helpText = $langs->trans('PAPERLESS_TAG_NAME_HELP');
+
 $item = $formSetup->newItem('PAPERLESS_REDIRECT_PDF_UPLOADS');
 $item->setAsYesNo();
 $item->helpText = $langs->trans('PAPERLESS_REDIRECT_PDF_UPLOADS_HELP');
