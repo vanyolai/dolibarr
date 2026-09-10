@@ -58,13 +58,14 @@ class modPaperless extends DolibarrModules
 		$this->warnings_activation = array();
 		$this->warnings_activation_ext = array();
 
+		// Keep integration settings when the module is temporarily disabled/re-enabled.
 		$this->const = array(
-			1 => array('PAPERLESS_API_URL', 'chaine', '', 'Paperless-ngx base URL used for REST API calls', 0, 'current', 1),
-			2 => array('PAPERLESS_WEB_URL', 'chaine', '', 'Paperless-ngx browser URL; defaults to API URL', 0, 'current', 1),
-			3 => array('PAPERLESS_API_TOKEN', 'chaine', '', 'Paperless-ngx API token', 0, 'current', 1),
-			4 => array('PAPERLESS_REDIRECT_PDF_UPLOADS', 'yesno', 1, 'Send PDF uploads from linked-document pages to Paperless-ngx', 0, 'current', 1),
-			5 => array('PAPERLESS_HTTP_TIMEOUT', 'chaine', '30', 'HTTP timeout in seconds', 0, 'current', 1),
-			6 => array('PAPERLESS_RESOLVE_WAIT', 'chaine', '10', 'Seconds to wait for Paperless consumption when opening a queued link', 0, 'current', 1),
+			1 => array('PAPERLESS_API_URL', 'chaine', '', 'Paperless-ngx base URL used for REST API calls', 0, 'current', 0),
+			2 => array('PAPERLESS_WEB_URL', 'chaine', '', 'Paperless-ngx browser URL; defaults to API URL', 0, 'current', 0),
+			3 => array('PAPERLESS_API_TOKEN', 'chaine', '', 'Paperless-ngx API token', 0, 'current', 0),
+			4 => array('PAPERLESS_REDIRECT_PDF_UPLOADS', 'yesno', 1, 'Send PDF uploads from linked-document pages to Paperless-ngx', 0, 'current', 0),
+			5 => array('PAPERLESS_HTTP_TIMEOUT', 'chaine', '30', 'HTTP timeout in seconds', 0, 'current', 0),
+			6 => array('PAPERLESS_RESOLVE_WAIT', 'chaine', '10', 'Seconds to wait for Paperless consumption when opening a queued link', 0, 'current', 0),
 		);
 
 		$this->tabs = array();
