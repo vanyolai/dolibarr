@@ -31,7 +31,7 @@ class modPaperless extends DolibarrModules
 		$this->descriptionlong = 'ModulePaperlessDescLong';
 		$this->editor_name = 'Krisztian Vanyolai';
 		$this->editor_url = '';
-		$this->version = '0.1.3';
+		$this->version = '0.1.4';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'file-pdf';
 
@@ -67,6 +67,7 @@ class modPaperless extends DolibarrModules
 			4 => array('PAPERLESS_REDIRECT_PDF_UPLOADS', 'yesno', 1, 'Send PDF uploads from linked-document pages to Paperless-ngx', 0, 'current', 0),
 			5 => array('PAPERLESS_HTTP_TIMEOUT', 'chaine', '30', 'HTTP timeout in seconds', 0, 'current', 0),
 			6 => array('PAPERLESS_RESOLVE_WAIT', 'chaine', '10', 'Seconds to wait for Paperless consumption when opening a queued link', 0, 'current', 0),
+			7 => array('PAPERLESS_TAG_NAME', 'chaine', 'dolibarr', 'Paperless tag applied to documents uploaded from Dolibarr; empty disables tagging', 0, 'current', 0),
 		);
 
 		$this->tabs = array();
