@@ -31,7 +31,7 @@ class modPaperless extends DolibarrModules
 		$this->descriptionlong = 'ModulePaperlessDescLong';
 		$this->editor_name = 'Krisztian Vanyolai';
 		$this->editor_url = '';
-		$this->version = '0.1.1';
+		$this->version = '0.1.2';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'file-pdf';
 
