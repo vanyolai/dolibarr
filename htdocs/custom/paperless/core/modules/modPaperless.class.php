@@ -31,13 +31,15 @@ class modPaperless extends DolibarrModules
 		$this->descriptionlong = 'ModulePaperlessDescLong';
 		$this->editor_name = 'Krisztian Vanyolai';
 		$this->editor_url = '';
-		$this->version = '0.1.0';
+		$this->version = '0.1.1';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'file-pdf';
 
 		$this->module_parts = array(
 			'hooks' => array(
-				'data' => array('globalcard'),
+				// Attachment pages use many object-specific hook contexts. Register globally,
+				// then let ActionsPaperless strictly qualify only standard attachment POSTs.
+				'data' => array('all'),
 				'entity' => '0',
 			),
 		);
