@@ -147,7 +147,7 @@ class ActionsPaperless extends CommonHookActions
 				continue;
 			}
 
-			$resolverBase = dol_buildpath('/paperless/open.php', 1);
+			$resolverBase = dol_buildpath('/paperless/open.php', 2);
 			$link = new Link($this->db);
 			$link->entity = isset($object->entity) && $object->entity ? (int) $object->entity : 0;
 			$link->url = $resolverBase.'?task='.rawurlencode($taskId);
