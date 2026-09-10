@@ -32,7 +32,7 @@ class ActionsPaperless extends CommonHookActions
 	}
 
 	/**
-	 * Intercept the standard linked-document upload action for PDF-only submissions.
+	 * Intercept standard attachment-form uploads for PDF-only submissions.
 	 * Non-PDF uploads are deliberately left to Dolibarr core.
 	 *
 	 * @param array<string,mixed> $parameters Hook metadata
@@ -51,6 +51,13 @@ class ActionsPaperless extends CommonHookActions
 		if (!getDolGlobalInt('PAPERLESS_REDIRECT_PDF_UPLOADS', 1)) {
 			return 0;
 		}
+
+		// form_attach_new_file() appends uploadform=1 to its action URL. This is a much
+		// more reliable way to identify Dolibarr's standard attachment workflow than
+		// matching page names or object-specific hook contexts.
+		if (GETPOSTINT('uploadform') !== 1) {
+			return 0;
+		}
 		if (!GETPOST('sendit', 'alpha') || !getDolGlobalString('MAIN_UPLOAD_DOC')) {
 			return 0;
 		}
@@ -58,16 +65,20 @@ class ActionsPaperless extends CommonHookActions
 			return 0;
 		}
 
-		$currentContext = isset($parameters['currentcontext']) ? (string) $parameters['currentcontext'] : '';
-		$currentPage = isset($_SERVER['PHP_SELF']) ? basename((string) $_SERVER['PHP_SELF']) : '';
-		if (stripos($currentContext, 'document') === false && stripos($currentPage, 'document') === false) {
-			return 0;
-		}
-
-		// Let the native handler enforce object-specific rights if a caller did not define this variable.
+		// Let the native page establish object-specific upload permissions first.
 		if (!isset($permissiontoadd) || empty($permissiontoadd)) {
 			return 0;
 		}
+		if (!is_object($object) || empty($object->id) || empty($object->element)) {
+			return 0;
+		}
+
+		$currentContext = isset($parameters['currentcontext']) ? (string) $parameters['currentcontext'] : '';
+		dol_syslog(
+			'ActionsPaperless::doActions attachment candidate context='.$currentContext.
+			' objecttype='.(string) $object->element.' objectid='.(int) $object->id,
+			LOG_DEBUG
+		);
 
 		$files = $this->normalizeUserFiles($_FILES['userfile']);
 		if (empty($files)) {
@@ -109,19 +120,8 @@ class ActionsPaperless extends CommonHookActions
 		require_once DOL_DOCUMENT_ROOT.'/core/class/link.class.php';
 
 		$client = new PaperlessClient($apiUrl, $apiToken, $webUrl, $httpTimeout);
-		$objectType = GETPOST('objecttype', 'alpha');
-		if ($objectType === '' && is_object($object) && !empty($object->element)) {
-			$objectType = (string) $object->element;
-		}
-		$objectId = GETPOSTINT('objectid');
-		if ($objectId <= 0 && is_object($object) && !empty($object->id)) {
-			$objectId = (int) $object->id;
-		}
-
-		if ($objectType === '' || $objectId <= 0) {
-			setEventMessages($langs->trans('PaperlessMissingObjectContext'), null, 'errors');
-			return 1;
-		}
+		$objectType = (string) $object->element;
+		$objectId = (int) $object->id;
 
 		$successCount = 0;
 		foreach ($files as $file) {
