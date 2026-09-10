@@ -32,6 +32,43 @@ class ActionsPaperless extends CommonHookActions
 	}
 
 	/**
+	 * Mark Dolibarr's standard attachment form so doActions can identify
+	 * Paperless-routed uploads without relying on page-specific query parameters.
+	 *
+	 * @param array<string,mixed> $parameters Hook metadata
+	 * @param CommonObject $object Current Dolibarr object
+	 * @param ?string $action Current action
+	 * @param HookManager $hookmanager Hook manager
+	 * @return int
+	 */
+	public function formattachOptionsUpload($parameters, &$object, &$action, $hookmanager)
+	{
+		$this->resprints = '';
+
+		if (!getDolGlobalInt('PAPERLESS_REDIRECT_PDF_UPLOADS', 1)) {
+			return 0;
+		}
+		if (empty($parameters['perm'])) {
+			return 0;
+		}
+		if (!is_object($object) || empty($object->id) || empty($object->element)) {
+			return 0;
+		}
+
+		$this->resprints = '<script nonce="'.getNonce().'">'
+			.'jQuery(function(){'
+			.'var f=jQuery("#formuserfile");'
+			.'if(f.length && !f.find("input[name=paperless_upload]").length){'
+			.'f.append("<input type=\"hidden\" name=\"paperless_upload\" value=\"1\">");'
+			.'}'
+			.'});'
+			.'</script>'
+			.'<div class="opacitymedium small"><span class="fa fa-file-pdf"></span> Paperless-ngx: PDF routing active</div>';
+
+		return 0;
+	}
+
+	/**
 	 * Intercept standard attachment-form uploads for PDF-only submissions.
 	 * Non-PDF uploads are deliberately left to Dolibarr core.
 	 *
@@ -48,17 +85,21 @@ class ActionsPaperless extends CommonHookActions
 		$this->resprints = '';
 		$langs->load('paperless@paperless');
 
+		if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['userfile'])) {
+			$currentContext = isset($parameters['currentcontext']) ? (string) $parameters['currentcontext'] : '';
+			dol_syslog(
+				'ActionsPaperless::doActions upload POST marker='.GETPOSTINT('paperless_upload').' context='.$currentContext,
+				LOG_INFO
+			);
+		}
+
 		if (!getDolGlobalInt('PAPERLESS_REDIRECT_PDF_UPLOADS', 1)) {
 			return 0;
 		}
-
-		// form_attach_new_file() appends uploadform=1 to its action URL. This is a much
-		// more reliable way to identify Dolibarr's standard attachment workflow than
-		// matching page names or object-specific hook contexts.
-		if (GETPOSTINT('uploadform') !== 1) {
+		if ($_SERVER['REQUEST_METHOD'] !== 'POST' || GETPOSTINT('paperless_upload') !== 1) {
 			return 0;
 		}
-		if (!GETPOST('sendit', 'alpha') || !getDolGlobalString('MAIN_UPLOAD_DOC')) {
+		if (!getDolGlobalString('MAIN_UPLOAD_DOC')) {
 			return 0;
 		}
 		if (!isset($_FILES['userfile']) || !is_array($_FILES['userfile'])) {
@@ -77,7 +118,7 @@ class ActionsPaperless extends CommonHookActions
 		dol_syslog(
 			'ActionsPaperless::doActions attachment candidate context='.$currentContext.
 			' objecttype='.(string) $object->element.' objectid='.(int) $object->id,
-			LOG_DEBUG
+			LOG_INFO
 		);
 
 		$files = $this->normalizeUserFiles($_FILES['userfile']);
