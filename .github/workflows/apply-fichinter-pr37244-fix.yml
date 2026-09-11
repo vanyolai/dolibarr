@@ -23,15 +23,19 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import re
 
           path = Path('htdocs/fichinter/card.php')
           text = path.read_text()
 
+          # Add Dolibarr's canonical seconds/minutes units to the existing switch.
+          pattern = r"(if \(\$prod->duration_value && getDolGlobalString\('FICHINTER_USE_SERVICE_DURATION'\)\) \{\s*switch \(\$prod->duration_unit\) \{\s*)(default:\s*case 'h':)"
+          replacement = r"\1case 's':\n\t\t\t\t\t\t\t\t\t$mult = 1;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\tcase 'mn':\n\t\t\t\t\t\t\t\t\t$mult = 60;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\t\2"
+          text, count = re.subn(pattern, replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'Failed to patch time-unit switch: {count} matches')
+
           replacements = [
-              (
-                  "\t\t\t\t\t\t\t\tdefault:\n\t\t\t\t\t\t\t\tcase 'h':",
-                  "\t\t\t\t\t\t\t\tcase 's':\n\t\t\t\t\t\t\t\t\t$mult = 1;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\tcase 'mn':\n\t\t\t\t\t\t\t\t\t$mult = 60;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\tdefault:\n\t\t\t\t\t\t\t\tcase 'h':"
-              ),
               (
                   "$duration = (int) $prod->duration_value * $mult * $lines[$i]->qty;",
                   "$duration = (int) round(((float) $prod->duration_value) * $mult * $lines[$i]->qty);"
@@ -40,17 +44,18 @@ jobs:
                   "$desc .= ' ('.$langs->trans('Quantity').': '.$lines[$i]->qty.')';",
                   "$unit_label = '';\n\t\t\t\t\tif ($lines[$i]->fk_unit) {\n\t\t\t\t\t\t$langs->load('measuring_units');\n\t\t\t\t\t\t$unit_label = $langs->trans($lines[$i]->getLabelOfUnit('short'));\n\t\t\t\t\t}\n\t\t\t\t\t$desc .= ' ('.$langs->trans('Quantity').': '.$lines[$i]->qty.($unit_label ? ' '.$unit_label : '').')';"
               ),
-              (
-                  "$timearray = dol_getdate(dol_now());\n\t\t\t\t\t$date_intervention = dol_mktime(0, 0, 0, $timearray['mon'], $timearray['mday'], $timearray['year']);",
-                  "$source_date = (!empty($srcobject->delivery_date) ? $srcobject->delivery_date : dol_now());\n\t\t\t\t\t$timearray = dol_getdate($source_date);\n\t\t\t\t\t$date_intervention = dol_mktime($timearray['hours'], $timearray['minutes'], 0, $timearray['mon'], $timearray['mday'], $timearray['year']);"
-              ),
           ]
-
           for old, new in replacements:
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f'Expected exactly one match, found {count}: {old[:80]!r}')
+                  raise SystemExit(f'Expected exactly one match, found {count}: {old!r}')
               text = text.replace(old, new, 1)
+
+          date_pattern = r"\$timearray = dol_getdate\(dol_now\(\)\);\s*\$date_intervention = dol_mktime\(0, 0, 0, \$timearray\['mon'\], \$timearray\['mday'\], \$timearray\['year'\]\);"
+          date_replacement = "$source_date = (!empty($srcobject->delivery_date) ? $srcobject->delivery_date : dol_now());\n\t\t\t\t\t$timearray = dol_getdate($source_date);\n\t\t\t\t\t$date_intervention = dol_mktime($timearray['hours'], $timearray['minutes'], 0, $timearray['mon'], $timearray['mday'], $timearray['year']);"
+          text, count = re.subn(date_pattern, lambda m: date_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'Failed to patch intervention date: {count} matches')
 
           path.write_text(text)
 
