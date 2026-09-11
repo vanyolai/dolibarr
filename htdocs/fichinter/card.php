@@ -445,12 +445,12 @@ if (empty($reshook)) {
 										if ($prod->duration_value && getDolGlobalString('FICHINTER_USE_SERVICE_DURATION')) {
 											switch ($prod->duration_unit) {
 												case 's':
-									$mult = 1;
-									break;
-								case 'mn':
-									$mult = 60;
-									break;
-								default:
+													$mult = 1;
+													break;
+												case 'mn':
+													$mult = 60;
+													break;
+												default:
 												case 'h':
 													$mult = 3600;
 													break;
@@ -479,15 +479,15 @@ if (empty($reshook)) {
 									$desc .= dol_htmlentitiesbr($lines[$i]->desc);
 									$desc .= '<br>';
 									$unit_label = '';
-					if ($lines[$i]->fk_unit) {
-						$langs->load('measuring_units');
-						$unit_label = $langs->trans($lines[$i]->getLabelOfUnit('short'));
-					}
-					$desc .= ' ('.$langs->trans('Quantity').': '.$lines[$i]->qty.($unit_label ? ' '.$unit_label : '').')';
+									if ($lines[$i]->fk_unit) {
+										$langs->load('measuring_units');
+										$unit_label = $langs->trans($lines[$i]->getLabelOfUnit('short'));
+									}
+									$desc .= ' ('.$langs->trans('Quantity').': '.$lines[$i]->qty.($unit_label ? ' '.$unit_label : '').')';
 
 									$source_date = (!empty($srcobject->delivery_date) ? $srcobject->delivery_date : dol_now());
-					$timearray = dol_getdate($source_date);
-					$date_intervention = dol_mktime($timearray['hours'], $timearray['minutes'], 0, $timearray['mon'], $timearray['mday'], $timearray['year']);
+									$timearray = dol_getdate($source_date);
+									$date_intervention = dol_mktime($timearray['hours'], $timearray['minutes'], 0, $timearray['mon'], $timearray['mday'], $timearray['year']);
 
 									if ($product_type == Product::TYPE_PRODUCT) {
 										$duration = 0;
