@@ -1,0 +1,104 @@
+name: Normalize intervention patch formatting
+
+on:
+  push:
+    branches:
+      - '23.0'
+    paths:
+      - '.github/workflows/fix-fichinter-format.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  format-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: '23.0'
+          fetch-depth: 1
+
+      - name: Normalize indentation
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('htdocs/fichinter/card.php')
+          lines = path.read_text().splitlines()
+
+          # Normalize the service-duration switch using the indentation of the enclosing if.
+          start = next(i for i, line in enumerate(lines) if "if ($prod->duration_value && getDolGlobalString('FICHINTER_USE_SERVICE_DURATION'))" in line)
+          end = next(i for i in range(start, len(lines)) if "$duration = (int) round(((float) $prod->duration_value)" in lines[i])
+          base = lines[start][:len(lines[start]) - len(lines[start].lstrip())]
+          switch = [
+              base + "if ($prod->duration_value && getDolGlobalString('FICHINTER_USE_SERVICE_DURATION')) {",
+              base + "\tswitch ($prod->duration_unit) {",
+              base + "\t\tcase 's':",
+              base + "\t\t\t$mult = 1;",
+              base + "\t\t\tbreak;",
+              base + "\t\tcase 'mn':",
+              base + "\t\t\t$mult = 60;",
+              base + "\t\t\tbreak;",
+              base + "\t\tdefault:",
+              base + "\t\tcase 'h':",
+              base + "\t\t\t$mult = 3600;",
+              base + "\t\t\tbreak;",
+              base + "\t\tcase 'd':",
+              base + "\t\t\t$mult = 3600 * 24;",
+              base + "\t\t\tbreak;",
+              base + "\t\tcase 'w':",
+              base + "\t\t\t$mult = 3600 * 24 * 7;",
+              base + "\t\t\tbreak;",
+              base + "\t\tcase 'm':",
+              base + "\t\t\t$mult = (int) (3600 * 24 * (365 / 12)); // Average month duration",
+              base + "\t\t\tbreak;",
+              base + "\t\tcase 'y':",
+              base + "\t\t\t$mult = 3600 * 24 * 365;",
+              base + "\t\t\tbreak;",
+              base + "\t}",
+              base + "\t$duration = (int) round(((float) $prod->duration_value) * $mult * $lines[$i]->qty);",
+              base + "}",
+          ]
+          # Include the existing closing brace directly after the duration assignment.
+          close = end + 1
+          if lines[close].strip() != '}':
+              raise SystemExit('Unexpected duration block closing brace')
+          lines[start:close + 1] = switch
+
+          # Normalize quantity/unit block and source-date block based on common description indentation.
+          qty = next(i for i, line in enumerate(lines) if "$unit_label = '';" in line)
+          common_base = lines[qty - 1][:len(lines[qty - 1]) - len(lines[qty - 1].lstrip())]
+          qty_end = next(i for i in range(qty, len(lines)) if "$desc .= ' ('.$langs->trans('Quantity')" in lines[i])
+          qty_block = [
+              common_base + "$unit_label = '';",
+              common_base + "if ($lines[$i]->fk_unit) {",
+              common_base + "\t$langs->load('measuring_units');",
+              common_base + "\t$unit_label = $langs->trans($lines[$i]->getLabelOfUnit('short'));",
+              common_base + "}",
+              common_base + "$desc .= ' ('.$langs->trans('Quantity').': '.$lines[$i]->qty.($unit_label ? ' '.$unit_label : '').')';",
+          ]
+          lines[qty:qty_end + 1] = qty_block
+
+          source = next(i for i, line in enumerate(lines) if "$source_date = (!empty($srcobject->delivery_date)" in line)
+          date_end = next(i for i in range(source, len(lines)) if "$date_intervention = dol_mktime(" in lines[i])
+          date_block = [
+              common_base + "$source_date = (!empty($srcobject->delivery_date) ? $srcobject->delivery_date : dol_now());",
+              common_base + "$timearray = dol_getdate($source_date);",
+              common_base + "$date_intervention = dol_mktime($timearray['hours'], $timearray['minutes'], 0, $timearray['mon'], $timearray['mday'], $timearray['year']);",
+          ]
+          lines[source:date_end + 1] = date_block
+
+          path.write_text('\n'.join(lines) + '\n')
+
+      - name: Syntax check
+        run: php -l htdocs/fichinter/card.php
+
+      - name: Commit formatting and remove temporary workflow
+        run: |
+          rm .github/workflows/fix-fichinter-format.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add htdocs/fichinter/card.php .github/workflows/fix-fichinter-format.yml
+          git commit -m "Style intervention source-date and duration fix"
+          git push origin HEAD:23.0
