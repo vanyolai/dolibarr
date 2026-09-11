@@ -1,0 +1,57 @@
+name: Apply corrected intervention fix
+
+on:
+  push:
+    branches:
+      - '23.0'
+    paths:
+      - '.github/workflows/apply-fichinter-pr37244-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: '23.0'
+          fetch-depth: 0
+
+      - name: Apply corrected PR 37244 changes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('htdocs/fichinter/card.php')
+          text = path.read_text()
+
+          old_duration = """\t\t\t\t\t\tif ($prod->duration_value && getDolGlobalString('FICHINTER_USE_SERVICE_DURATION')) {\n\t\t\t\t\t\t\tswitch ($prod->duration_unit) {\n\t\t\t\t\t\t\t\tdefault:\n\t\t\t\t\t\t\t\tcase 'h':\n\t\t\t\t\t\t\t\t\t$mult = 3600;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\tcase 'd':\n\t\t\t\t\t\t\t\t\t$mult = 3600 * 24;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\tcase 'w':\n\t\t\t\t\t\t\t\t\t$mult = 3600 * 24 * 7;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\tcase 'm':\n\t\t\t\t\t\t\t\t\t$mult = (int) (3600 * 24 * (365 / 12)); // Average month duration\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\tcase 'y':\n\t\t\t\t\t\t\t\t\t$mult = 3600 * 24 * 365;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t$duration = (int) $prod->duration_value * $mult * $lines[$i]->qty;\n\t\t\t\t\t\t}\n"""
+
+          new_duration = """\t\t\t\t\t\tif ($prod->duration_value && getDolGlobalString('FICHINTER_USE_SERVICE_DURATION')) {\n\t\t\t\t\t\t\tswitch ($prod->duration_unit) {\n\t\t\t\t\t\t\t\tcase 's':\n\t\t\t\t\t\t\t\t\t$mult = 1;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\tcase 'mn':\n\t\t\t\t\t\t\t\t\t$mult = 60;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\tdefault:\n\t\t\t\t\t\t\t\tcase 'h':\n\t\t\t\t\t\t\t\t\t$mult = 3600;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\tcase 'd':\n\t\t\t\t\t\t\t\t\t$mult = 3600 * 24;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\tcase 'w':\n\t\t\t\t\t\t\t\t\t$mult = 3600 * 24 * 7;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\tcase 'm':\n\t\t\t\t\t\t\t\t\t$mult = (int) (3600 * 24 * (365 / 12)); // Average month duration\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\tcase 'y':\n\t\t\t\t\t\t\t\t\t$mult = 3600 * 24 * 365;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t$duration = (int) round(((float) $prod->duration_value) * $mult * $lines[$i]->qty);\n\t\t\t\t\t\t}\n"""
+
+          old_desc_date = """\t\t\t\t\t$desc .= dol_htmlentitiesbr($lines[$i]->desc);\n\t\t\t\t\t$desc .= '<br>';\n\t\t\t\t\t$desc .= ' ('.$langs->trans('Quantity').': '.$lines[$i]->qty.')';\n\n\t\t\t\t\t$timearray = dol_getdate(dol_now());\n\t\t\t\t\t$date_intervention = dol_mktime(0, 0, 0, $timearray['mon'], $timearray['mday'], $timearray['year']);\n"""
+
+          new_desc_date = """\t\t\t\t\t$desc .= dol_htmlentitiesbr($lines[$i]->desc);\n\t\t\t\t\t$desc .= '<br>';\n\t\t\t\t\t$unit_label = '';\n\t\t\t\t\tif ($lines[$i]->fk_unit) {\n\t\t\t\t\t\t$langs->load('measuring_units');\n\t\t\t\t\t\t$unit_label = $langs->trans($lines[$i]->getLabelOfUnit('short'));\n\t\t\t\t\t}\n\t\t\t\t\t$desc .= ' ('.$langs->trans('Quantity').': '.$lines[$i]->qty.($unit_label ? ' '.$unit_label : '').')';\n\n\t\t\t\t\t$source_date = (!empty($srcobject->delivery_date) ? $srcobject->delivery_date : dol_now());\n\t\t\t\t\t$timearray = dol_getdate($source_date);\n\t\t\t\t\t$date_intervention = dol_mktime($timearray['hours'], $timearray['minutes'], 0, $timearray['mon'], $timearray['mday'], $timearray['year']);\n"""
+
+          if text.count(old_duration) != 1:
+              raise SystemExit(f'Expected exactly one duration block, found {text.count(old_duration)}')
+          if text.count(old_desc_date) != 1:
+              raise SystemExit(f'Expected exactly one description/date block, found {text.count(old_desc_date)}')
+
+          text = text.replace(old_duration, new_duration, 1)
+          text = text.replace(old_desc_date, new_desc_date, 1)
+          path.write_text(text)
+
+      - name: Syntax check
+        run: php -l htdocs/fichinter/card.php
+
+      - name: Commit corrected fix and remove temporary workflow
+        run: |
+          rm .github/workflows/apply-fichinter-pr37244-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add htdocs/fichinter/card.php .github/workflows/apply-fichinter-pr37244-fix.yml
+          git commit -m "Fix intervention source date and service duration handling"
+          git push origin HEAD:23.0
