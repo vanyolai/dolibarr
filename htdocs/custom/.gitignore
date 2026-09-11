@@ -2,3 +2,11 @@
 !.gitignore
 !README.md
 !index.html
+
+# Standalone external modules maintained as git subtrees
+!paperless/
+!paperless/**
+!banksync/
+!banksync/**
+!navinvoice/
+!navinvoice/**
