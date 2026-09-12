@@ -21,7 +21,7 @@ class NavInvoiceApi
         $this->signingKey = trim($this->readSecret('NAVINVOICE_SIGNING_KEY'));
         $this->environment = getDolGlobalString('NAVINVOICE_ENVIRONMENT', 'test') === 'production' ? 'production' : 'test';
         $this->softwareId = trim((string) getDolGlobalString('NAVINVOICE_SOFTWARE_ID', 'DOLIBARRNAVSYNC001'));
-        $this->softwareVersion = '0.7.1';
+        $this->softwareVersion = '0.8.0';
     }
 
     public function isConfigured(): bool
@@ -66,6 +66,47 @@ class NavInvoiceApi
             .'</invoiceIssueDate></mandatoryQueryParams></invoiceQueryParams>';
 
         return $this->request('queryInvoiceDigest', 'QueryInvoiceDigestRequest', $body);
+    }
+
+    /**
+     * Query the authoritative NAV relation chain for an invoice.
+     *
+     * NAV accepts an optional taxpayer number in this request. The module omits
+     * it by default because the authenticated taxpayer and invoice direction are
+     * normally sufficient, but callers may provide it when disambiguation is
+     * needed.
+     */
+    public function queryInvoiceChainDigest(
+        string $invoiceNumber,
+        string $direction = 'OUTBOUND',
+        int $page = 1,
+        ?string $taxNumber = null
+    ): SimpleXMLElement {
+        $invoiceNumber = trim($invoiceNumber);
+        if ($invoiceNumber === '') {
+            throw new Exception('Invoice number is required for NAV invoice-chain query.');
+        }
+        $direction = $this->normalizeDirection($direction);
+        if ($page < 1) {
+            throw new Exception('NAV page number must be positive.');
+        }
+
+        $body = '<page>'.$page.'</page>'
+            .'<invoiceChainQuery>'
+            .'<invoiceNumber>'.$this->xml($invoiceNumber).'</invoiceNumber>'
+            .'<invoiceDirection>'.$direction.'</invoiceDirection>';
+
+        if ($taxNumber !== null && trim($taxNumber) !== '') {
+            $normalizedTaxNumber = $this->normalizeTaxNumber($taxNumber);
+            if (strlen($normalizedTaxNumber) !== 8) {
+                throw new Exception('NAV invoice-chain taxpayer number must contain the first 8 digits of the Hungarian tax number.');
+            }
+            $body .= '<taxNumber>'.$this->xml($normalizedTaxNumber).'</taxNumber>';
+        }
+
+        $body .= '</invoiceChainQuery>';
+
+        return $this->request('queryInvoiceChainDigest', 'QueryInvoiceChainDigestRequest', $body);
     }
 
     public function queryInvoiceData(string $invoiceNumber, int $batchIndex = 0, string $direction = 'OUTBOUND'): string

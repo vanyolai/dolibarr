@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.8.0 - development
+
+- Document git subtree as the preferred integration model; this repository is the authoritative module source and Dolibarr consumes it under `htdocs/custom/navinvoice`.
+- Promote `queryTaxpayer` into a reusable current taxpayer master-data service with namespace-independent parsing, tax-number normalization and HQ/site/branch address handling.
+- Add a dedicated partner-resolution page that compares historical invoice party data with current NAV taxpayer master data.
+- Add controlled third-party creation from freshly queried NAV data, with duplicate-candidate blocking, country mapping and a second match check immediately before creation.
+- Create suppliers/customers with only the role implied by invoice direction and return to invoice import after successful creation.
+- Keep invoice party values out of partner writes; invoice data is comparison/history only, while creation values come from the fresh NAV master-data response.
+- Add a dedicated `partner_required` batch state when partner absence is the only remaining import blocker, with direct routing into the NAV taxpayer/partner resolution workflow.
+- Add a NAV relation resolver for CREATE/MODIFY/STORNO chains, including original mirror lookup, modification-index sequencing, `modifyWithoutMaster` handling and original Dolibarr invoice linkage.
+- Add `queryInvoiceChainDigest` support and compare the complete paginated authoritative NAV chain with the local mirror before permitting a non-CREATE import.
+- Add a relation-review page that exposes the local and authoritative chain state before import.
+- Add guarded MODIFY/STORNO draft import when the relation is deterministic: negative MODIFY and STORNO map to Dolibarr credit notes; positive MODIFY maps to a standard adjustment; all are linked to the original Dolibarr invoice.
+- Keep zero-value/non-financial MODIFY operations blocked instead of inventing a financial document, and block `modifyWithoutMaster` until a safe Dolibarr policy exists.
+- Require earlier modification indexes to be imported first and block source-partner mismatches, authoritative-chain mismatches and unsupported Dolibarr negative-line configurations.
+- Apply the same non-CREATE operation policy to single-invoice and batch preflight/import paths.
+- Add Hungarian and English UI strings for taxpayer, partner, relation and non-CREATE import workflows.
+- Keep product/supplier-product matching as the next major development block after controlled non-CREATE import.
+
 ## 0.7.2 - development
 
 - Map NAV `invoiceDeliveryDate` to Dolibarr's native `date_pointoftax` field on customer and supplier invoice imports.
@@ -9,7 +28,7 @@
 ## 0.7.1 - development
 
 - Block invoice import when the matched Dolibarr third party has no country assigned, because Dolibarr needs the country for correct VAT handling on invoice lines.
-- Block import when the Dolibarr partner country conflicts with the country code reported in the NAV invoice, requiring manual review instead of guessing VAT treatment.
+- Block import when the Dolibarr partner country conflicts with the country code reported by NAV, requiring manual review instead of guessing VAT treatment.
 - Keep NAV partner enrichment read-only; invoice import does not silently mutate third-party master data.
 
 ## 0.7.0 - development
@@ -85,4 +104,4 @@
 ## 0.1.0 - development
 
 - Initial NAV Online Invoice read-only synchronization foundation.
-- Repository root is now the Dolibarr module root, suitable for direct installation or Git submodule use at `htdocs/custom/navinvoice`.
+- Repository root is now the Dolibarr module root, suitable for direct installation or Git subtree use at `htdocs/custom/navinvoice`.
