@@ -177,7 +177,13 @@ class NavInvoiceSync
 
                 if ($fetchFullData) {
                     if ($upsert['changed'] || !$upsert['data_fetched']) {
-                        $xml = $api->queryInvoiceData($data['invoice_number'], (int) $data['batch_index'], $direction);
+                        $supplierTaxNumber = trim((string) ($data['supplier_tax_number'] ?? ''));
+                        $xml = $api->queryInvoiceData(
+                            $data['invoice_number'],
+                            (int) $data['batch_index'],
+                            $direction,
+                            $supplierTaxNumber !== '' ? $supplierTaxNumber : null
+                        );
                         $this->storeInvoiceData((int) $upsert['rowid'], $xml);
                         $stats['downloaded']++;
                     } elseif ($upsert['amounts_missing']) {
