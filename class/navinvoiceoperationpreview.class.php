@@ -2,15 +2,17 @@
 
 dol_include_once('/navinvoice/class/navinvoiceimportpreview.class.php');
 dol_include_once('/navinvoice/class/navinvoiceoperationpolicy.class.php');
+dol_include_once('/navinvoice/class/navinvoiceaggregatesupport.class.php');
 dol_include_once('/navinvoice/class/navproductmatcher.class.php');
 
 /**
- * Extend the canonical accounting preview with NAV operation semantics and
- * conservative NAV-line to Dolibarr-product resolution.
+ * Extend the established accounting/data preview with NAV operation semantics
+ * and conservative NAV-line to Dolibarr-product resolution.
  *
- * NavInvoiceParser is the only XML parser and NavInvoiceImportPreview owns all
- * accounting/category semantics. This wrapper adds only operation/relation and
- * product-resolution policy.
+ * The base preview remains responsible for partner, VAT, currency, line and
+ * duplicate checks. This wrapper replaces its blanket non-CREATE blocker with
+ * the stricter relation/authoritative-chain/mapping policy and enriches every
+ * mapped line with an exact product match when one is deterministic.
  */
 class NavInvoiceOperationPreview
 {
@@ -26,6 +28,9 @@ class NavInvoiceOperationPreview
     /** @var NavInvoiceOperationPolicy */
     private $operationPolicy;
 
+    /** @var NavInvoiceAggregateSupport */
+    private $aggregateSupport;
+
     /** @var NavProductMatcher */
     private $productMatcher;
 
@@ -40,6 +45,7 @@ class NavInvoiceOperationPreview
         $this->entity = $entity;
         $this->basePreview = new NavInvoiceImportPreview($db, $entity, $baseCurrency);
         $this->operationPolicy = new NavInvoiceOperationPolicy($db, $entity);
+        $this->aggregateSupport = new NavInvoiceAggregateSupport();
         $this->productMatcher = new NavProductMatcher($db, $entity);
     }
 
@@ -51,7 +57,10 @@ class NavInvoiceOperationPreview
      */
     public function build(array $parsed, $record, ?array $partnerMatch): array
     {
+        $sourceXml = (string) ($record->invoice_data ?? '');
         $preview = $this->basePreview->build($parsed, $record, $partnerMatch);
+        $preview = $this->aggregateSupport->enrich($preview, $sourceXml);
+        $preview = $this->applyNavLineDiscounts($preview, $sourceXml);
         $preview = $this->applyProductMatches($preview);
 
         $operation = strtoupper(trim((string) ($preview['operation'] ?? 'CREATE')));
@@ -65,6 +74,9 @@ class NavInvoiceOperationPreview
         $preview['standalone_without_master'] = false;
         $preview['operation_policy'] = null;
 
+        // CREATE invoices do not need chain resolution. Deposit import is now
+        // enabled for inbound supplier invoices. Outbound deposit invoices stay
+        // blocked until NAV-number validation and outbound policy are enabled.
         if ($operation === 'CREATE') {
             if ($isAdvanceInvoice && $direction !== 'INBOUND') {
                 $preview['blockers'] = array_values(array_unique(array_merge(
@@ -76,8 +88,8 @@ class NavInvoiceOperationPreview
             return $preview;
         }
 
-        // The base preview blocks every non-CREATE operation until the verified
-        // relation/chain policy below has made the mapping deterministic.
+        // The base preview intentionally blocks every non-CREATE operation.
+        // Replace that generic blocker with concrete operation-policy results.
         $blockers = array_values(array_diff(
             array_map('strval', $preview['blockers'] ?? array()),
             array('operation_relation')
@@ -114,8 +126,135 @@ class NavInvoiceOperationPreview
     }
 
     /**
-     * A CREATE is a deposit only when every monetary line is explicitly flagged
-     * by NAV as advance. Zero-amount descriptive rows do not affect the decision.
+     * Replace an effective preview unit price with the original NAV unitPrice
+     * when lineDiscountData deterministically explains the authoritative line
+     * net amount. This makes the preview match the native Dolibarr
+     * unit-price + remise_percent representation restored by the import trigger.
+     *
+     * @param array<string,mixed> $preview
+     * @return array<string,mixed>
+     */
+    private function applyNavLineDiscounts(array $preview, string $xml): array
+    {
+        if ($xml === '' || empty($preview['lines']) || !is_array($preview['lines'])) {
+            return $preview;
+        }
+
+        libxml_use_internal_errors(true);
+        $document = simplexml_load_string($xml, 'SimpleXMLElement', LIBXML_NONET | LIBXML_NOCDATA);
+        libxml_clear_errors();
+        if (!$document instanceof SimpleXMLElement) {
+            return $preview;
+        }
+
+        $navLines = $document->xpath('//*[local-name()="invoiceLines"]/*[local-name()="line"]');
+        if (!$navLines || count($navLines) !== count($preview['lines'])) {
+            return $preview;
+        }
+
+        foreach ($navLines as $index => $navLine) {
+            if (!isset($preview['lines'][$index]) || !is_array($preview['lines'][$index])) {
+                continue;
+            }
+
+            $preview['lines'][$index]['discount_percent'] = 0.0;
+            $preview['lines'][$index]['discount_value'] = null;
+            $preview['lines'][$index]['discount_rate'] = null;
+            $preview['lines'][$index]['discount_description'] = '';
+            $preview['lines'][$index]['discount_native'] = false;
+
+            $quantityText = $this->xmlText($navLine, './*[local-name()="quantity"]');
+            $unitPriceText = $this->xmlText($navLine, './*[local-name()="unitPrice"]');
+            $netText = $this->xmlText($navLine, './*[local-name()="lineAmountsNormal"]/*[local-name()="lineNetAmountData"]/*[local-name()="lineNetAmount"]');
+            if ($quantityText === '' || $unitPriceText === '' || $netText === ''
+                || !is_numeric($quantityText) || !is_numeric($unitPriceText) || !is_numeric($netText)) {
+                continue;
+            }
+
+            $quantity = (float) $quantityText;
+            $unitPrice = (float) $unitPriceText;
+            $net = (float) $netText;
+            if (abs($quantity) <= 0.000000001) {
+                continue;
+            }
+
+            $extended = $quantity * $unitPrice;
+            if ($this->amountsClose($extended, $net)) {
+                continue;
+            }
+
+            $discountPercent = $this->validatedDiscountPercent($navLine, $extended, $net);
+            if ($discountPercent === null) {
+                continue;
+            }
+
+            $valueText = $this->xmlText($navLine, './*[local-name()="lineDiscountData"]/*[local-name()="discountValue"]');
+            $rateText = $this->xmlText($navLine, './*[local-name()="lineDiscountData"]/*[local-name()="discountRate"]');
+            $description = $this->xmlText($navLine, './*[local-name()="lineDiscountData"]/*[local-name()="discountDescription"]');
+
+            $preview['lines'][$index]['unit_price_ht'] = $unitPrice;
+            $preview['lines'][$index]['unit_price_adjusted'] = false;
+            $preview['lines'][$index]['discount_percent'] = $discountPercent;
+            $preview['lines'][$index]['discount_value'] = $valueText !== '' && is_numeric($valueText) ? (float) $valueText : null;
+            $preview['lines'][$index]['discount_rate'] = $rateText !== '' && is_numeric($rateText) ? (float) $rateText : null;
+            $preview['lines'][$index]['discount_description'] = $description;
+            $preview['lines'][$index]['discount_native'] = true;
+        }
+
+        return $preview;
+    }
+
+    /** @return float|null */
+    private function validatedDiscountPercent(SimpleXMLElement $navLine, float $extended, float $net): ?float
+    {
+        if (abs($extended) <= 0.000000001) {
+            return null;
+        }
+
+        $rateText = $this->xmlText($navLine, './*[local-name()="lineDiscountData"]/*[local-name()="discountRate"]');
+        if ($rateText !== '' && is_numeric($rateText)) {
+            $rate = abs((float) $rateText);
+            if ($rate <= 1.0) {
+                $percent = $rate * 100.0;
+                if ($percent <= 100.0 && $this->amountsClose($extended * (1.0 - $rate), $net)) {
+                    return $percent;
+                }
+            }
+        }
+
+        $valueText = $this->xmlText($navLine, './*[local-name()="lineDiscountData"]/*[local-name()="discountValue"]');
+        if ($valueText !== '' && is_numeric($valueText)) {
+            $discountValue = abs((float) $valueText);
+            $percent = 100.0 * $discountValue / abs($extended);
+            if ($percent >= 0.0 && $percent <= 100.0
+                && $this->amountsClose($extended * (1.0 - ($percent / 100.0)), $net)) {
+                return $percent;
+            }
+        }
+
+        return null;
+    }
+
+    private function amountsClose(float $left, float $right): bool
+    {
+        return abs($left - $right) <= 0.01;
+    }
+
+    private function xmlText(SimpleXMLElement $node, string $xpath): string
+    {
+        $nodes = $node->xpath($xpath);
+        if (!$nodes) {
+            return '';
+        }
+        return trim((string) $nodes[0]);
+    }
+
+    /**
+     * A CREATE is considered a deposit/advance invoice only when at least one
+     * monetary line exists and every monetary line is explicitly flagged by NAV
+     * as advance. Zero-amount descriptive rows are ignored for this decision.
+     * This deliberately avoids classifying final invoices that merely contain an
+     * advance settlement line as deposit invoices.
      */
     private function isAdvanceOnlyInvoice(array $preview): bool
     {
@@ -138,12 +277,24 @@ class NavInvoiceOperationPreview
         return $hasMonetaryLine;
     }
 
-    /** @param array<string,mixed> $preview @return array<string,mixed> */
+    /**
+     * Add read-only product resolution to every mapped line. Missing or
+     * uncertain product matches never block invoice import: such rows remain
+     * free-text invoice lines until the product master data is resolved.
+     *
+     * @param array<string,mixed> $preview
+     * @return array<string,mixed>
+     */
     private function applyProductMatches(array $preview): array
     {
         $direction = strtoupper(trim((string) ($preview['direction'] ?? '')));
         $partnerId = is_array($preview['partner'] ?? null) ? (int) ($preview['partner']['id'] ?? 0) : 0;
-        $summary = array('matched' => 0, 'unmatched' => 0, 'ambiguous' => 0, 'review' => 0);
+        $summary = array(
+            'matched' => 0,
+            'unmatched' => 0,
+            'ambiguous' => 0,
+            'review' => 0,
+        );
 
         foreach (($preview['lines'] ?? array()) as $index => $line) {
             if (!is_array($line)) {
