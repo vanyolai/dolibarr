@@ -136,6 +136,18 @@ class modNavInvoice extends DolibarrModules
 
     public function init($options = '')
     {
+        $invoiceTable = MAIN_DB_PREFIX.'navinvoice_invoice';
+        if ($this->tableExists($invoiceTable)) {
+            require_once dirname(__DIR__, 2).'/class/navinvoicesync.class.php';
+            try {
+                $migrator = new NavInvoiceSync($this->db);
+                $migrator->migrateLegacySchema();
+            } catch (Throwable $e) {
+                $this->error = 'NAV legacy schema migration failed: '.$e->getMessage();
+                return -1;
+            }
+        }
+
         $result = $this->_load_tables('/navinvoice/sql/');
         if ($result < 0) {
             return -1;
@@ -151,4 +163,17 @@ class modNavInvoice extends DolibarrModules
         $sql = array();
         return $this->_remove($sql, $options);
     }
+
+    private function tableExists(string $table): bool
+    {
+        $resql = $this->db->query("SHOW TABLES LIKE '".$this->db->escape($table)."'");
+        if (!$resql) {
+            return false;
+        }
+        $exists = (bool) $this->db->fetch_object($resql);
+        $this->db->free($resql);
+        return $exists;
+    }
+
+
 }
