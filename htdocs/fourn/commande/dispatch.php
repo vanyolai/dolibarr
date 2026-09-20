@@ -970,6 +970,10 @@ if ($id > 0 || !empty($ref)) {
 							print '</td>'; // Qty to dispatch
 							print '<td>';
 							//print img_picto($langs->trans('AddStockLocationLine'), 'split', 'class="splitbutton" onClick="addDispatchLine(' . $i . ',\'' . $type . '\')"');
+							if ($objp->tobatch == 2) {
+								// Product managed with unique serial numbers: allow to enter several serial numbers at once (one line per serial)
+								print img_picto($langs->trans('EnterMultipleSerialNumbers'), 'barcode', 'class="splitbutton marginleftonly" onClick="addDispatchLinesFromSerialList('.$i.', \''.$type.'\')"');
+							}
 							print '</td>'; // Dispatch column
 							print '<td></td>'; // Warehouse column
 
