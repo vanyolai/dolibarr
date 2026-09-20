@@ -211,7 +211,7 @@ function addDispatchLinesFromSerialList(index, type) {
 	console.log("fourn/js/lib_dispatch.js.php addDispatchLinesFromSerialList type="+type+" index="+index);
 
 	var $dialog = jQuery("#dialogforpopup");
-	var html = '<textarea id="seriallist" class="centpercent" rows="10" placeholder=<?php echo "'".dol_escape_js(dol_escape_htmltag($langs->transnoentitiesnoconv("EnterOneSerialNumberPerLine")))."'" ; ?>></textarea>';
+	var html = '<textarea id="seriallist" class="centpercent" rows="10" placeholder="<?php echo dol_escape_js(dol_escape_htmltag($langs->transnoentitiesnoconv("EnterOneSerialNumberPerLine"))); ?>"></textarea>';
 	html += '<div id="seriallistmessage" class="opacitymedium paddingtop"></div>';
 	$dialog.html(html);
 
@@ -221,17 +221,17 @@ function addDispatchLinesFromSerialList(index, type) {
 	};
 
 	jQuery("#seriallist").on("input", function() {
-		jQuery("#seriallistmessage").removeClass("error").text(<?php echo "'".dol_escape_js($langs->transnoentitiesnoconv("NbOfSerialNumbersDetected", "%s"))."'" ; ?>.replace('%s', getSerialList().length));
+		jQuery("#seriallistmessage").removeClass("error").text('<?php echo dol_escape_js($langs->transnoentitiesnoconv("NbOfSerialNumbersDetected", "%s")); ?>'.replace('%s', getSerialList().length));
 	});
 
 	$dialog.dialog({
-		title: <?php echo "'".dol_escape_js($langs->transnoentitiesnoconv("EnterMultipleSerialNumbers"))."'" ; ?>,
+		title: '<?php echo dol_escape_js($langs->transnoentitiesnoconv("EnterMultipleSerialNumbers")); ?>',
 		modal: true,
 		resizable: false,
 		width: 'auto',
 		buttons: [
 			{
-				text: <?php echo "'".dol_escape_js($langs->transnoentitiesnoconv("Apply"))."'" ; ?>,
+				text: '<?php echo dol_escape_js($langs->transnoentitiesnoconv("Apply")); ?>',
 				click: function() {
 					var serials = getSerialList();
 					if (serials.length == 0) {
@@ -241,7 +241,7 @@ function addDispatchLinesFromSerialList(index, type) {
 					var seen = {};
 					for (var n = 0; n < serials.length; n++) {
 						if (seen[serials[n]]) {
-							jQuery("#seriallistmessage").addClass("error").text(<?php echo "'".dol_escape_js($langs->transnoentitiesnoconv("ErrorDuplicateSerialNumberInList", "%s"))."'" ; ?>.replace('%s', serials[n]));
+							jQuery("#seriallistmessage").addClass("error").text('<?php echo dol_escape_js($langs->transnoentitiesnoconv("ErrorDuplicateSerialNumberInList", "%s")); ?>'.replace('%s', serials[n]));
 							return;
 						}
 						seen[serials[n]] = true;
@@ -264,7 +264,7 @@ function addDispatchLinesFromSerialList(index, type) {
 				}
 			},
 			{
-				text: <?php echo "'".dol_escape_js($langs->transnoentitiesnoconv("Cancel"))."'" ; ?>,
+				text: '<?php echo dol_escape_js($langs->transnoentitiesnoconv("Cancel")); ?>',
 				click: function() {
 					jQuery(this).dialog("close");
 				}
