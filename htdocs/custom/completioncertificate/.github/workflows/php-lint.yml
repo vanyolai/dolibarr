@@ -17,3 +17,11 @@ jobs:
           coverage: none
       - name: Lint PHP files
         run: find . -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Guard external-module dropdown URLs
+        run: |
+          if grep -nE "'url'[[:space:]]*=>[[:space:]]*'/completioncertificate/" class/actions_completioncertificate.class.php; then
+            echo "External-module dropdown URLs must use urlroot/urlraw with dol_buildpath(..., 1), not a core-relative url."
+            exit 1
+          fi
+          grep -F "'urlroot' => dol_buildpath('/completioncertificate/card.php', 1)" class/actions_completioncertificate.class.php

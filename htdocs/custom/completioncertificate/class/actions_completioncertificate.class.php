@@ -44,7 +44,7 @@ class ActionsCompletionCertificate extends CommonHookActions
 			'enabled' => ((int) $object->status > 0),
 			'perm' => $user->hasRight('completioncertificate', 'write'),
 			'label' => 'CreateCompletionCertificate',
-			'url' => '/completioncertificate/card.php?orderid='.((int) $object->id),
+			'urlroot' => dol_buildpath('/completioncertificate/card.php', 1).'?orderid='.((int) $object->id),
 		);
 
 		return 0;
