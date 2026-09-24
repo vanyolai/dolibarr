@@ -1,6 +1,8 @@
 <?php
 /* Copyright (C) 2026 Krisztian Vanyolai */
 
+// Force Dolibarr's native CSRF validation for all state-changing actions.
+define('CSRFCHECK_WITH_TOKEN', 1);
 require '../../main.inc.php';
 require_once DOL_DOCUMENT_ROOT.'/commande/class/commande.class.php';
 dol_include_once('/completioncertificate/class/completioncertificate.class.php');
@@ -29,9 +31,6 @@ if ($id > 0 && $action !== 'save') {
  */
 if ($action === 'save') {
 	if (!$user->hasRight('completioncertificate', 'write')) {
-		accessforbidden();
-	}
-	if (!checkToken()) {
 		accessforbidden();
 	}
 
@@ -67,9 +66,6 @@ if ($action === 'validate' && $id > 0) {
 	if (!$user->hasRight('completioncertificate', 'write')) {
 		accessforbidden();
 	}
-	if (!checkToken()) {
-		accessforbidden();
-	}
 
 	if ($certificate->validate($user) > 0) {
 		header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
@@ -80,9 +76,6 @@ if ($action === 'validate' && $id > 0) {
 
 if ($action === 'delete' && $id > 0) {
 	if (!$user->hasRight('completioncertificate', 'delete')) {
-		accessforbidden();
-	}
-	if (!checkToken()) {
 		accessforbidden();
 	}
 
