@@ -15,6 +15,11 @@ class modCompletionCertificate extends DolibarrModules {
   $this->rights[$r++]=array(581203,'Delete completion certificates',0,'delete');
   $this->menu=array();
  }
- public function init($options='') { return $this->_init(array('/completioncertificate/sql/llx_completioncertificate.sql','/completioncertificate/sql/llx_completioncertificate_line.sql'),$options); }
+ public function init($options='') {
+  $result = $this->_load_tables('/completioncertificate/sql/');
+  if ($result <= 0) return -1;
+  $sql = array();
+  return $this->_init($sql, $options);
+ }
  public function remove($options='') { return $this->_remove(array(),$options); }
 }
