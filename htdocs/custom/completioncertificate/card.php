@@ -367,7 +367,8 @@ if ($orderId > 0 && $id <= 0) {
 } elseif ($id > 0) {
 	$formconfirm = '';
 
-	if ($action === 'delete') {
+	// Delete confirmation: follow the native ModuleBuilder preloaded AJAX pattern.
+	if ($action === 'delete' || ($conf->use_javascript_ajax && empty($conf->dol_use_jmobile))) {
 		$formconfirm = $form->formconfirm(
 			$_SERVER['PHP_SELF'].'?id='.$certificate->id,
 			$langs->trans('Delete'),
@@ -377,15 +378,19 @@ if ($orderId > 0 && $id <= 0) {
 			0,
 			'action-delete'
 		);
-	} elseif ($action === 'close') {
-		$formconfirm = $form->formconfirm(
+	}
+
+	// Invalidation is a status transition, not a delete action.
+	// Use the normal Dolibarr confirmation flow instead of binding it to a delete-style AJAX button.
+	if ($action === 'close') {
+		$formconfirm .= $form->formconfirm(
 			$_SERVER['PHP_SELF'].'?id='.$certificate->id,
 			$langs->trans('InvalidateCompletionCertificate'),
 			$langs->trans('ConfirmInvalidateCompletionCertificate', $certificate->ref),
 			'confirm_close',
 			'',
 			0,
-			'action-close'
+			1
 		);
 	}
 	print $formconfirm;
@@ -413,19 +418,27 @@ if ($orderId > 0 && $id <= 0) {
 	if ($action !== 'presend') {
 		print '<div class="tabsAction">';
 
+		// Native ModuleBuilder delete-button pattern.
+		$deleteUrl = $_SERVER['PHP_SELF'].'?id='.$id.'&action=delete&token='.newToken();
+		$deleteButtonId = 'action-delete-no-ajax';
+		if ($conf->use_javascript_ajax && empty($conf->dol_use_jmobile)) {
+			$deleteUrl = '';
+			$deleteButtonId = 'action-delete';
+		}
+
 		if ($certificate->status === Certificate::STATUS_DRAFT) {
 			print dolGetButtonAction('', $langs->trans('Modify'), 'default', $_SERVER['PHP_SELF'].'?id='.$id.'&action=edit&token='.newToken(), '', $permissiontoadd);
 			print dolGetButtonAction('', $langs->trans('Validate'), 'default', $_SERVER['PHP_SELF'].'?id='.$id.'&action=confirm_validate&confirm=yes&token='.newToken(), '', $permissiontoadd);
-			print dolGetButtonAction('', $langs->trans('Delete'), 'delete', $_SERVER['PHP_SELF'].'?id='.$id.'&action=delete&token='.newToken(), 'action-delete', $permissiontodelete);
+			print dolGetButtonAction('', $langs->trans('Delete'), 'delete', $deleteUrl, $deleteButtonId, $permissiontodelete);
 		} elseif ($certificate->status === Certificate::STATUS_VALIDATED) {
 			if (empty($user->socid)) {
 				print dolGetButtonAction('', $langs->trans('SendMail'), 'email', $_SERVER['PHP_SELF'].'?id='.$id.'&action=presend&token='.newToken().'&mode=init#formmailbeforetitle');
 			}
 			print dolGetButtonAction('', $langs->trans('SetToDraft'), 'default', $_SERVER['PHP_SELF'].'?id='.$id.'&action=confirm_setdraft&confirm=yes&token='.newToken(), '', $permissiontoadd);
-			print dolGetButtonAction('', $langs->trans('InvalidateCompletionCertificate'), 'delete', $_SERVER['PHP_SELF'].'?id='.$id.'&action=close&token='.newToken(), 'action-close', $permissiontoadd);
+			print dolGetButtonAction('', $langs->trans('InvalidateCompletionCertificate'), 'default', $_SERVER['PHP_SELF'].'?id='.$id.'&action=close&token='.newToken(), '', $permissiontoadd);
 		} elseif ($certificate->status === Certificate::STATUS_CANCELED) {
 			print dolGetButtonAction('', $langs->trans('ReOpen'), 'default', $_SERVER['PHP_SELF'].'?id='.$id.'&action=confirm_reopen&confirm=yes&token='.newToken(), '', $permissiontoadd);
-			print dolGetButtonAction('', $langs->trans('Delete'), 'delete', $_SERVER['PHP_SELF'].'?id='.$id.'&action=delete&token='.newToken(), 'action-delete', $permissiontodelete);
+			print dolGetButtonAction('', $langs->trans('Delete'), 'delete', $deleteUrl, $deleteButtonId, $permissiontodelete);
 		}
 
 		print '</div>';
