@@ -1,4 +1,4 @@
-CREATE TABLE llx_completioncertificate_line (
+CREATE TABLE IF NOT EXISTS llx_completioncertificate_line (
  rowid integer AUTO_INCREMENT PRIMARY KEY,
  fk_completioncertificate integer NOT NULL,
  fk_commandedet integer NOT NULL,
