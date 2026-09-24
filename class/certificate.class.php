@@ -153,7 +153,7 @@ class Certificate extends CommonObject
 		return (int) ($obj->nb ?? 0);
 	}
 
-	public function getUsedQuantitiesForOrder($orderId)
+	public function getUsedQuantitiesForOrder($orderId, $excludeCertificateId = 0)
 	{
 		global $conf;
 
@@ -164,6 +164,9 @@ class Certificate extends CommonObject
 		$sql .= ' WHERE c.entity = '.((int) $conf->entity);
 		$sql .= ' AND c.fk_commande = '.((int) $orderId);
 		$sql .= ' AND c.status IN ('.self::STATUS_DRAFT.', '.self::STATUS_VALIDATED.')';
+		if ($excludeCertificateId > 0) {
+			$sql .= ' AND c.rowid <> '.((int) $excludeCertificateId);
+		}
 		$sql .= ' GROUP BY l.fk_commandedet';
 
 		$resql = $this->db->query($sql);
@@ -292,6 +295,139 @@ class Certificate extends CommonObject
 		return $newId;
 	}
 
+	/**
+	 * Update a draft certificate from its source order.
+	 *
+	 * @param Commande $order Source order
+	 * @param User $user User making the change
+	 * @param string $dateCompletion YYYY-MM-DD
+	 * @param string $notePublic Public note
+	 * @param array<int,float> $requestedQty Requested quantities by order-line ID
+	 * @return int 1 on success, negative value on error
+	 */
+	public function updateDraftFromOrder($order, $user, $dateCompletion, $notePublic, array $requestedQty)
+	{
+		global $langs;
+
+		if ($this->id <= 0 || $this->status !== self::STATUS_DRAFT) {
+			$this->error = $langs->trans('CompletionCertificateNotDraft');
+			return -1;
+		}
+		if ((int) $order->id !== (int) $this->fk_commande || (int) $order->status <= 0) {
+			$this->error = $langs->trans('CompletionCertificateInvalidSourceOrder');
+			return -2;
+		}
+		if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateCompletion)) {
+			$this->error = $langs->trans('CompletionCertificateInvalidDate');
+			return -3;
+		}
+
+		$order->getLinesArray();
+		$used = $this->getUsedQuantitiesForOrder((int) $order->id, (int) $this->id);
+		$linesToCreate = array();
+
+		foreach ($order->lines as $line) {
+			$lineId = (int) $line->id;
+			$orderedQty = (float) $line->qty;
+			$usedQty = (float) ($used[$lineId] ?? 0.0);
+			$availableQty = max(0.0, $orderedQty - $usedQty);
+			$qty = max(0.0, (float) ($requestedQty[$lineId] ?? 0.0));
+
+			if ($qty > $availableQty) {
+				$qty = $availableQty;
+			}
+			if ($qty <= 0) {
+				continue;
+			}
+
+			$linesToCreate[] = array('line' => $line, 'qty' => $qty);
+		}
+
+		if (empty($linesToCreate)) {
+			$this->error = $langs->trans('CompletionCertificateNoQuantity');
+			return -4;
+		}
+
+		$this->db->begin();
+
+		$sql = 'UPDATE '.$this->db->prefix().'completioncertificate';
+		$sql .= " SET date_completion = '".$this->db->escape($dateCompletion)."'";
+		$sql .= ", note_public = '".$this->db->escape($notePublic)."'";
+		$sql .= ' WHERE rowid = '.((int) $this->id);
+		$sql .= ' AND status = '.self::STATUS_DRAFT;
+		if (!$this->db->query($sql)) {
+			$this->error = $this->db->lasterror();
+			$this->db->rollback();
+			return -5;
+		}
+
+		if (!$this->db->query('DELETE FROM '.$this->db->prefix().'completioncertificate_line WHERE fk_completioncertificate = '.((int) $this->id))) {
+			$this->error = $this->db->lasterror();
+			$this->db->rollback();
+			return -6;
+		}
+
+		foreach ($linesToCreate as $item) {
+			$line = $item['line'];
+			$qty = (float) $item['qty'];
+			$description = self::buildOrderLineDescription($line);
+
+			$sql = 'INSERT INTO '.$this->db->prefix().'completioncertificate_line (';
+			$sql .= 'fk_completioncertificate, fk_commandedet, fk_product, description, qty_ordered, qty_certified, rang';
+			$sql .= ') VALUES (';
+			$sql .= ((int) $this->id).',';
+			$sql .= ((int) $line->id).',';
+			$sql .= (!empty($line->fk_product) ? (int) $line->fk_product : 'NULL').',';
+			$sql .= "'".$this->db->escape($description)."',";
+			$sql .= ((float) $line->qty).',';
+			$sql .= $qty.',';
+			$sql .= ((int) $line->rang).')';
+
+			if (!$this->db->query($sql)) {
+				$this->error = $this->db->lasterror();
+				$this->db->rollback();
+				return -7;
+			}
+		}
+
+		$this->db->commit();
+		$this->fetch($this->id);
+		return 1;
+	}
+
+	/**
+	 * Check whether this certificate can reserve its current quantities.
+	 * Canceled certificates do not reserve quantity, so this is required before reopening.
+	 *
+	 * @return bool
+	 */
+	private function canReserveCurrentQuantities()
+	{
+		require_once DOL_DOCUMENT_ROOT.'/commande/class/commande.class.php';
+
+		$order = new Commande($this->db);
+		if ($order->fetch((int) $this->fk_commande) <= 0) {
+			return false;
+		}
+		$order->getLinesArray();
+
+		$orderQty = array();
+		foreach ($order->lines as $line) {
+			$orderQty[(int) $line->id] = (float) $line->qty;
+		}
+
+		$used = $this->getUsedQuantitiesForOrder((int) $this->fk_commande, (int) $this->id);
+		foreach ($this->lines as $line) {
+			$lineId = (int) $line->fk_commandedet;
+			$available = (float) ($orderQty[$lineId] ?? 0.0) - (float) ($used[$lineId] ?? 0.0);
+			if ((float) $line->qty_certified > $available + 0.000001) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	public function validate($user)
 	{
 		global $conf, $langs;
@@ -318,36 +454,100 @@ class Certificate extends CommonObject
 		return 1;
 	}
 
-	public function deleteDraft()
+	/**
+	 * Set the certificate back to draft.
+	 */
+	public function setDraft($user, $notrigger = 0)
 	{
-		global $conf, $langs, $user;
+		if ($this->status !== self::STATUS_VALIDATED) {
+			return 0;
+		}
+		$result = $this->setStatusCommon($user, self::STATUS_DRAFT, $notrigger, 'COMPLETIONCERTIFICATE_CERTIFICATE_UNVALIDATE');
+		if ($result > 0) {
+			$this->status = self::STATUS_DRAFT;
+		}
+		return $result;
+	}
 
-		if ($this->id <= 0 || $this->status !== self::STATUS_DRAFT) {
-			$this->error = $langs->trans('CompletionCertificateDeleteDraftOnly');
+	/**
+	 * Cancel/invalidate a validated certificate.
+	 */
+	public function cancel($user, $notrigger = 0)
+	{
+		if ($this->status !== self::STATUS_VALIDATED) {
+			return 0;
+		}
+		$result = $this->setStatusCommon($user, self::STATUS_CANCELED, $notrigger, 'COMPLETIONCERTIFICATE_CERTIFICATE_CANCEL');
+		if ($result > 0) {
+			$this->status = self::STATUS_CANCELED;
+		}
+		return $result;
+	}
+
+	/**
+	 * Reopen a canceled certificate as validated.
+	 */
+	public function reopen($user, $notrigger = 0)
+	{
+		global $langs;
+
+		if ($this->status !== self::STATUS_CANCELED) {
+			return 0;
+		}
+		if (!$this->canReserveCurrentQuantities()) {
+			$this->error = $langs->trans('CompletionCertificateQuantityNoLongerAvailable');
+			return -1;
+		}
+		$result = $this->setStatusCommon($user, self::STATUS_VALIDATED, $notrigger, 'COMPLETIONCERTIFICATE_CERTIFICATE_REOPEN');
+		if ($result > 0) {
+			$this->status = self::STATUS_VALIDATED;
+		}
+		return $result;
+	}
+
+	/**
+	 * Delete a draft or canceled certificate, its lines, links and generated documents.
+	 */
+	public function delete($user, $notrigger = 0)
+	{
+		global $langs;
+
+		if ($this->id <= 0 || !in_array($this->status, array(self::STATUS_DRAFT, self::STATUS_CANCELED), true)) {
+			$this->error = $langs->trans('CompletionCertificateDeleteNotAllowed');
 			return -1;
 		}
 
-		// Remove native Dolibarr object links first.
+		$this->db->begin();
+
 		$this->deleteObjectLinked(null, '', null, '', 0, $user);
 
-		$this->db->begin();
 		if (!$this->db->query('DELETE FROM '.$this->db->prefix().'completioncertificate_line WHERE fk_completioncertificate = '.((int) $this->id))) {
 			$this->error = $this->db->lasterror();
 			$this->db->rollback();
-			return -1;
+			return -2;
 		}
 
 		$sql = 'DELETE FROM '.$this->db->prefix().'completioncertificate';
 		$sql .= ' WHERE rowid = '.((int) $this->id);
-		$sql .= ' AND entity = '.((int) $conf->entity);
-		$sql .= ' AND status = '.self::STATUS_DRAFT;
 		if (!$this->db->query($sql)) {
 			$this->error = $this->db->lasterror();
 			$this->db->rollback();
-			return -1;
+			return -3;
 		}
 
 		$this->db->commit();
+
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
+		$baseOutput = getMultidirOutput($this, $this->module);
+		if (empty($baseOutput)) {
+			$baseOutput = DOL_DATA_ROOT.'/completioncertificate';
+		}
+		$dir = $baseOutput.'/'.$this->element.'/'.dol_sanitizeFileName($this->ref);
+		if (dol_is_dir($dir)) {
+			$countDeleted = 0;
+			dol_delete_dir_recursive($dir, 0, 1, 0, $countDeleted, 1);
+		}
+
 		return 1;
 	}
 
