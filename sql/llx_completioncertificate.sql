@@ -1,4 +1,4 @@
-CREATE TABLE llx_completioncertificate (
+CREATE TABLE IF NOT EXISTS llx_completioncertificate (
  rowid integer AUTO_INCREMENT PRIMARY KEY,
  entity integer NOT NULL DEFAULT 1,
  ref varchar(30) NOT NULL,
