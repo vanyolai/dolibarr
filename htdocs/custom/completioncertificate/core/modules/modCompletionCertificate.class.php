@@ -24,7 +24,7 @@ class modCompletionCertificate extends DolibarrModules
 		$this->description = 'ModuleCompletionCertificateDesc';
 		$this->editor_name = 'Krisztian Vanyolai';
 		$this->editor_url = 'https://github.com/vanyolai/dolibarr-completioncertificate';
-		$this->version = '0.2.1';
+		$this->version = '0.3.1';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'check-circle';
 
@@ -35,7 +35,7 @@ class modCompletionCertificate extends DolibarrModules
 			'menus' => 0,
 			'tpl' => 0,
 			'barcode' => 0,
-			'models' => 0,
+			'models' => 1,
 			'printing' => 0,
 			'theme' => 0,
 			'css' => array(),
@@ -44,7 +44,7 @@ class modCompletionCertificate extends DolibarrModules
 			'moduleforexternal' => 0,
 		);
 
-		$this->dirs = array('/completioncertificate/temp');
+		$this->dirs = array('/completioncertificate/temp', '/completioncertificate/certificate');
 		$this->config_page_url = array();
 		$this->hidden = false;
 		$this->depends = array('modCommande');
@@ -62,6 +62,9 @@ class modCompletionCertificate extends DolibarrModules
 		}
 
 		$this->tabs = array();
+		$this->tabs[] = array(
+			'data' => 'order:+completioncertificates:CompletionCertificates:completioncertificate@completioncertificate:$user->hasRight("completioncertificate", "read"):/completioncertificate/order.php?id=__ID__'
+		);
 		$this->dictionaries = array();
 		$this->boxes = array();
 		$this->cronjobs = array();
@@ -95,18 +98,37 @@ class modCompletionCertificate extends DolibarrModules
 
 	public function init($options = '')
 	{
+		global $conf;
+
 		$result = $this->_load_tables('/completioncertificate/sql/');
 		if ($result <= 0) {
 			return -1;
 		}
 
 		$sql = array();
+
+		// Register the standard document model using the same mechanism as ModuleBuilder modules.
+		$sql[] = "DELETE FROM ".$this->db->prefix()."document_model WHERE nom = 'standard_certificate' AND type = 'certificate' AND entity = ".((int) $conf->entity);
+		$sql[] = "INSERT INTO ".$this->db->prefix()."document_model (nom, type, entity) VALUES ('standard_certificate', 'certificate', ".((int) $conf->entity).")";
+
+		// Backfill native Dolibarr links for certificates created by earlier 0.x versions.
+		$sql[] = "INSERT INTO ".$this->db->prefix()."element_element (fk_source, sourcetype, fk_target, targettype) "
+			."SELECT c.fk_commande, 'commande', c.rowid, 'completioncertificate_certificate' "
+			."FROM ".$this->db->prefix()."completioncertificate c "
+			."WHERE c.entity = ".((int) $conf->entity)." "
+			."AND NOT EXISTS (SELECT 1 FROM ".$this->db->prefix()."element_element ee "
+			."WHERE ee.fk_source = c.fk_commande AND ee.sourcetype = 'commande' "
+			."AND ee.fk_target = c.rowid AND ee.targettype = 'completioncertificate_certificate')";
+
 		return $this->_init($sql, $options);
 	}
 
 	public function remove($options = '')
 	{
+		global $conf;
+
 		$sql = array();
+		$sql[] = "DELETE FROM ".$this->db->prefix()."document_model WHERE nom = 'standard_certificate' AND type = 'certificate' AND entity = ".((int) $conf->entity);
 		return $this->_remove($sql, $options);
 	}
 }

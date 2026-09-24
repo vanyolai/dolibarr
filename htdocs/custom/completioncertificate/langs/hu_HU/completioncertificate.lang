@@ -14,3 +14,10 @@ CompletionCertificateInvalidDate=Érvénytelen teljesítési dátum.
 CompletionCertificateNoQuantity=Nincs igazolható fennmaradó mennyiség.
 CompletionCertificateNotDraft=A teljesítésigazolás már nem piszkozat.
 CompletionCertificateDeleteDraftOnly=Csak piszkozat állapotú teljesítésigazolás törölhető.
+CompletionCertificateStatement=Az alábbi tételek teljesítését a megjelölt mennyiségben igazoljuk.
+CompletionCertificateLinkWarning=A teljesítésigazolás létrejött, de a megrendeléshez tartozó Dolibarr objektumkapcsolat létrehozása nem sikerült.
+
+CompletionCertificates=Teljesítésigazolások
+NoCompletionCertificates=Ehhez a megrendeléshez még nincs teljesítésigazolás.
+Contractor=Vállalkozó
+Customer=Megrendelő

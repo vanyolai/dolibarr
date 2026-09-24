@@ -1,11 +1,13 @@
 <?php
-/* Copyright (C) 2026 Krisztian Vanyolai */
+/* Copyright (C) 2026 Vanyolai Krisztián <vanyolai@gmail.com> */
 
-// Force Dolibarr's native CSRF validation for all state-changing actions.
+// Let Dolibarr's main.inc.php perform the native CSRF validation.
 define('CSRFCHECK_WITH_TOKEN', 1);
+
 require '../../main.inc.php';
 require_once DOL_DOCUMENT_ROOT.'/commande/class/commande.class.php';
-dol_include_once('/completioncertificate/class/completioncertificate.class.php');
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.formfile.class.php';
+dol_include_once('/completioncertificate/class/certificate.class.php');
 
 $langs->loadLangs(array('orders', 'completioncertificate@completioncertificate'));
 
@@ -17,7 +19,11 @@ $id = GETPOSTINT('id');
 $orderId = GETPOSTINT('orderid');
 $action = GETPOST('action', 'aZ09');
 
-$certificate = new CompletionCertificate($db);
+$permissiontoadd = $user->hasRight('completioncertificate', 'write');
+$permissiontodelete = $user->hasRight('completioncertificate', 'delete');
+
+$certificate = new Certificate($db);
+$object = $certificate;
 
 if ($id > 0 && $action !== 'save') {
 	$result = $certificate->fetch($id);
@@ -30,7 +36,7 @@ if ($id > 0 && $action !== 'save') {
  * Actions
  */
 if ($action === 'save') {
-	if (!$user->hasRight('completioncertificate', 'write')) {
+	if (!$permissiontoadd) {
 		accessforbidden();
 	}
 
@@ -54,28 +60,39 @@ if ($action === 'save') {
 
 	$newId = $certificate->createFromOrder($order, $user, $dateCompletion, $notePublic, $requestedQty);
 	if ($newId > 0) {
+		if (!empty($certificate->warnings)) {
+			setEventMessages('', $certificate->warnings, 'warnings');
+		}
 		header('Location: '.dol_buildpath('/completioncertificate/card.php', 1).'?id='.$newId);
 		exit;
 	}
 
-	setEventMessages($certificate->error, null, 'errors');
+	setEventMessages($certificate->error, $certificate->errors, 'errors');
 	$action = 'create';
 }
 
 if ($action === 'validate' && $id > 0) {
-	if (!$user->hasRight('completioncertificate', 'write')) {
+	if (!$permissiontoadd) {
 		accessforbidden();
 	}
 
 	if ($certificate->validate($user) > 0) {
+		// Generate the first standard PDF immediately after validation.
+		$certificate->fetch($id);
+		$certificate->fetch_thirdparty();
+		$generationResult = $certificate->generateDocument('standard_certificate', $langs);
+		if ($generationResult <= 0) {
+			setEventMessages($certificate->error, $certificate->errors, 'warnings');
+		}
+
 		header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
 		exit;
 	}
-	setEventMessages($certificate->error, null, 'errors');
+	setEventMessages($certificate->error, $certificate->errors, 'errors');
 }
 
 if ($action === 'delete' && $id > 0) {
-	if (!$user->hasRight('completioncertificate', 'delete')) {
+	if (!$permissiontodelete) {
 		accessforbidden();
 	}
 
@@ -84,7 +101,21 @@ if ($action === 'delete' && $id > 0) {
 		header('Location: '.DOL_URL_ROOT.'/commande/card.php?id='.$sourceOrderId);
 		exit;
 	}
-	setEventMessages($certificate->error, null, 'errors');
+	setEventMessages($certificate->error, $certificate->errors, 'errors');
+}
+
+/*
+ * Native Dolibarr document actions.
+ */
+if ($id > 0 && ($action === 'builddoc' || $action === 'remove_file')) {
+	$objref = dol_sanitizeFileName($certificate->ref);
+	$baseOutput = getMultidirOutput($certificate, $certificate->module);
+	if (empty($baseOutput)) {
+		$baseOutput = DOL_DATA_ROOT.'/completioncertificate';
+	}
+	$upload_dir = $baseOutput.'/'.$certificate->element.'/'.$objref;
+
+	include DOL_DOCUMENT_ROOT.'/core/actions_builddoc.inc.php';
 }
 
 /*
@@ -131,7 +162,7 @@ if ($orderId > 0 && $id <= 0) {
 		$orderedQty = (float) $line->qty;
 		$usedQty = (float) ($usedQuantities[$lineId] ?? 0.0);
 		$remainingQty = max(0.0, $orderedQty - $usedQty);
-		$description = CompletionCertificate::buildOrderLineDescription($line);
+		$description = Certificate::buildOrderLineDescription($line);
 
 		print '<tr>';
 		print '<td>'.dol_htmlentitiesbr($description).'</td>';
@@ -164,7 +195,7 @@ if ($orderId > 0 && $id <= 0) {
 	print '<tr><td>'.$langs->trans('ThirdParty').'</td><td>'.dol_escape_htmltag($certificate->thirdparty_name).'</td></tr>';
 	print '<tr><td>'.$langs->trans('Order').'</td><td><a href="'.DOL_URL_ROOT.'/commande/card.php?id='.((int) $certificate->fk_commande).'">'.dol_escape_htmltag($certificate->order_ref).'</a></td></tr>';
 	print '<tr><td>'.$langs->trans('CompletionDate').'</td><td>'.dol_print_date($db->jdate($certificate->date_completion), 'day').'</td></tr>';
-	print '<tr><td>'.$langs->trans('Status').'</td><td>'.($certificate->status === CompletionCertificate::STATUS_VALIDATED ? $langs->trans('Validated') : $langs->trans('Draft')).'</td></tr>';
+	print '<tr><td>'.$langs->trans('Status').'</td><td>'.$certificate->getLibStatut(5).'</td></tr>';
 	print '</table>';
 	print '<br>';
 
@@ -191,16 +222,46 @@ if ($orderId > 0 && $id <= 0) {
 	}
 
 	print '<div class="tabsAction">';
-	if ($certificate->status === CompletionCertificate::STATUS_DRAFT && $user->hasRight('completioncertificate', 'write')) {
+	if ($certificate->status === Certificate::STATUS_DRAFT && $permissiontoadd) {
 		print dolGetButtonAction('', $langs->trans('Validate'), 'default', $_SERVER['PHP_SELF'].'?id='.$id.'&action=validate&token='.newToken(), '');
 	}
-	if ($certificate->status === CompletionCertificate::STATUS_VALIDATED) {
-		print dolGetButtonAction('', $langs->trans('PDF'), 'default', dol_buildpath('/completioncertificate/pdf.php', 1).'?id='.$id, '');
-	}
-	if ($certificate->status === CompletionCertificate::STATUS_DRAFT && $user->hasRight('completioncertificate', 'delete')) {
+	if ($certificate->status === Certificate::STATUS_DRAFT && $permissiontodelete) {
 		print dolGetButtonAction('', $langs->trans('Delete'), 'delete', $_SERVER['PHP_SELF'].'?id='.$id.'&action=delete&token='.newToken(), '');
 	}
 	print '</div>';
+
+	if ($certificate->status === Certificate::STATUS_VALIDATED) {
+		$formfile = new FormFile($db);
+		$objref = dol_sanitizeFileName($certificate->ref);
+		$baseOutput = getMultidirOutput($certificate, $certificate->module);
+		if (empty($baseOutput)) {
+			$baseOutput = DOL_DATA_ROOT.'/completioncertificate';
+		}
+		$filedir = $baseOutput.'/'.$certificate->element.'/'.$objref;
+		$urlsource = $_SERVER['PHP_SELF'].'?id='.$certificate->id;
+
+		print '<br>';
+		print $formfile->showdocuments(
+			'completioncertificate:Certificate',
+			$certificate->element.'/'.$objref,
+			$filedir,
+			$urlsource,
+			1,
+			(int) $permissiontoadd,
+			$certificate->model_pdf,
+			1,
+			0,
+			0,
+			0,
+			0,
+			'',
+			'',
+			'',
+			$langs->defaultlang,
+			'',
+			$certificate
+		);
+	}
 }
 
 llxFooter();
