@@ -16,3 +16,8 @@ CompletionCertificateNotDraft=The completion certificate is no longer a draft.
 CompletionCertificateDeleteDraftOnly=Only draft completion certificates can be deleted.
 CompletionCertificateStatement=We certify completion of the following items in the quantities shown.
 CompletionCertificateLinkWarning=The completion certificate was created, but its native Dolibarr link to the order could not be created.
+
+CompletionCertificates=Completion certificates
+NoCompletionCertificates=There are no completion certificates for this order yet.
+Contractor=Contractor
+Customer=Customer
