@@ -1,8 +1,17 @@
 <?php
+/* Copyright (C) 2026 Krisztian Vanyolai
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+
 require_once DOL_DOCUMENT_ROOT.'/core/class/commonhookactions.class.php';
 
 class ActionsCompletionCertificate extends CommonHookActions
 {
+	/** @var DoliDB */
 	public $db;
 
 	public function __construct($db)
@@ -10,11 +19,28 @@ class ActionsCompletionCertificate extends CommonHookActions
 		$this->db = $db;
 	}
 
+	/**
+	 * Add "Create completion certificate" to the order Create dropdown.
+	 *
+	 * Dolibarr 23 calls addMoreActionsButtons before it builds the core Create
+	 * dropdown, so the dropdown option array cannot be extended directly here.
+	 * We therefore inject one menu entry on DOM ready. The JavaScript itself is
+	 * kept in a nowdoc to avoid PHP/JavaScript quoting collisions.
+	 *
+	 * @param array<string,mixed> $parameters Hook parameters
+	 * @param Commande $object Current order
+	 * @param string $action Current action
+	 * @param HookManager $hookmanager Hook manager
+	 * @return int
+	 */
 	public function addMoreActionsButtons($parameters, &$object, &$action, $hookmanager)
 	{
 		global $langs, $user;
 
-		if (($parameters['currentcontext'] ?? '') !== 'ordercard' || empty($object->id) || $object->status <= 0) {
+		if (($parameters['currentcontext'] ?? '') !== 'ordercard') {
+			return 0;
+		}
+		if (!is_object($object) || empty($object->id) || (int) $object->status <= 0) {
 			return 0;
 		}
 		if (!$user->hasRight('completioncertificate', 'write')) {
@@ -25,52 +51,54 @@ class ActionsCompletionCertificate extends CommonHookActions
 
 		$url = dol_buildpath('/completioncertificate/card.php', 1).'?action=create&orderid='.(int) $object->id;
 		$label = $langs->trans('CreateCompletionCertificate');
-		$createLabel = $langs->trans('Create');
 
 		$urlJson = json_encode($url, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 		$labelJson = json_encode($label, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-		$createLabelJson = json_encode($createLabel, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
-		// Dolibarr 23 builds the order "Create" dropdown after this hook runs and
-		// does not expose its option array to hooks. Identify that dropdown by
-		// its core create links instead of by translated button text.
-		print '<script nonce="'.getNonce().'">
-		jQuery(function($) {
-			var targetUrl = '.$urlJson.';
-			var targetLabel = '.$labelJson.';
+		if ($urlJson === false || $labelJson === false) {
+			return 0;
+		}
 
-			function injectCompletionCertificateItem() {
-				$(".tabsAction .dropdown-holder .dropdown-content").each(function() {
-					var content = $(this);
-					if (content.find("[data-completioncertificate-create]").length) {
-						return;
-					}
+		$javascript = <<<'JS'
+jQuery(function ($) {
+	var targetUrl = __TARGET_URL__;
+	var targetLabel = __TARGET_LABEL__;
 
-					var isOrderCreateMenu = content.find(
-						'a[href*="/fourn/commande/card.php"],' +
-						'a[href*="/contrat/card.php"],' +
-						'a[href*="/expedition/shipment.php"],' +
-						'a[href*="/compta/facture/card.php"]'
-					).length > 0;
+	$(".tabsAction .dropdown-holder .dropdown-content").each(function () {
+		var content = $(this);
 
-					if (!isOrderCreateMenu) {
-						return;
-					}
+		if (content.find("[data-completioncertificate-create]").length) {
+			return;
+		}
 
-					$("<a>", {
-						"class": "dropdown-item",
-						"href": targetUrl,
-						"text": targetLabel,
-						"data-completioncertificate-create": "1"
-					}).appendTo(content);
-				});
-			}
+		var isOrderCreateMenu = content.find(
+			'a[href*="/fourn/commande/card.php?action=create"],' +
+			'a[href*="/contrat/card.php?action=create"],' +
+			'a[href*="/expedition/shipment.php"],' +
+			'a[href*="/compta/facture/card.php?action=create"]'
+		).length > 0;
 
-			injectCompletionCertificateItem();
-			window.setTimeout(injectCompletionCertificateItem, 0);
-			window.setTimeout(injectCompletionCertificateItem, 100);
-		});
-		</script>';
+		if (!isOrderCreateMenu) {
+			return;
+		}
+
+		$("<a>", {
+			"class": "dropdown-item",
+			"href": targetUrl,
+			"text": targetLabel,
+			"data-completioncertificate-create": "1"
+		}).appendTo(content);
+	});
+});
+JS;
+
+		$javascript = str_replace(
+			array('__TARGET_URL__', '__TARGET_LABEL__'),
+			array($urlJson, $labelJson),
+			$javascript
+		);
+
+		print '<script nonce="'.getNonce().'">'.$javascript.'</script>';
 
 		return 0;
 	}
