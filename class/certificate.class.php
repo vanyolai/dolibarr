@@ -125,6 +125,34 @@ class Certificate extends CommonObject
 		return 1;
 	}
 
+	/**
+	 * Return the number of completion certificates attached to an order.
+	 * Used by Dolibarr's native dynamic tab badge mechanism.
+	 *
+	 * @param int $orderId Customer order ID
+	 * @param mixed $unused Compatibility argument supplied by complete_head_from_modules()
+	 * @return int
+	 */
+	public function getOrderCertificateCount($orderId, $unused = null)
+	{
+		global $conf;
+
+		$sql = 'SELECT COUNT(*) AS nb';
+		$sql .= ' FROM '.$this->db->prefix().'completioncertificate';
+		$sql .= ' WHERE entity = '.((int) $conf->entity);
+		$sql .= ' AND fk_commande = '.((int) $orderId);
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			return 0;
+		}
+
+		$obj = $this->db->fetch_object($resql);
+		$this->db->free($resql);
+
+		return (int) ($obj->nb ?? 0);
+	}
+
 	public function getUsedQuantitiesForOrder($orderId)
 	{
 		global $conf;
