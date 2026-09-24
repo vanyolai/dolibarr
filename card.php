@@ -24,6 +24,9 @@ if ($id > 0 && $action !== 'save') {
 	}
 }
 
+/*
+ * Actions
+ */
 if ($action === 'save') {
 	if (!$user->hasRight('completioncertificate', 'write')) {
 		accessforbidden();
@@ -91,6 +94,9 @@ if ($action === 'delete' && $id > 0) {
 	setEventMessages($certificate->error, null, 'errors');
 }
 
+/*
+ * View
+ */
 llxHeader('', $langs->trans('CompletionCertificate'));
 print load_fiche_titre($langs->trans('CompletionCertificate'), '', 'check-circle');
 
