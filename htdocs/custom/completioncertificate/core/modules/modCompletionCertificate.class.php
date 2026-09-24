@@ -5,7 +5,7 @@ class modCompletionCertificate extends DolibarrModules {
   global $conf;
   $this->db=$db; $this->numero=581200; $this->rights_class='completioncertificate'; $this->family='crm';
   $this->module_position='90'; $this->name='CompletionCertificate'; $this->description='ModuleCompletionCertificateDesc';
-  $this->version='0.1.0'; $this->const_name='MAIN_MODULE_COMPLETIONCERTIFICATE'; $this->picto='check-circle';
+  $this->version='0.1.1'; $this->const_name='MAIN_MODULE_COMPLETIONCERTIFICATE'; $this->picto='check-circle';
   $this->module_parts=array('hooks'=>array('ordercard')); $this->dirs=array('/completioncertificate/temp');
   $this->langfiles=array('completioncertificate@completioncertificate'); $this->phpmin=array(8,1); $this->need_dolibarr_version=array(23,0);
   $this->depends=array('modCommande'); $this->config_page_url=array(); $this->tabs=array(); $this->dictionaries=array(); $this->boxes=array(); $this->cronjobs=array();
