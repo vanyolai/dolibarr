@@ -26,7 +26,7 @@ if ($action==='save' && $user->hasRight('completioncertificate','write')) {
 if ($action==='validate' && $id && $user->hasRight('completioncertificate','write')) { if(!checkToken()) accessforbidden(); $db->query("UPDATE ".MAIN_DB_PREFIX."completioncertificate SET status=1,fk_user_valid=".(int)$user->id." WHERE rowid=".(int)$id." AND entity=".(int)$conf->entity); header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id); exit; }
 llxHeader('',$langs->trans('CompletionCertificate'));
 print load_fiche_titre($langs->trans('CompletionCertificate'),'','check-circle');
-if ($action==='create' && $orderid) {
+if ($orderid > 0 && !$id) {
  $order=new Commande($db); if($order->fetch($orderid)<=0) accessforbidden(); $order->fetch_thirdparty(); $order->getLinesArray();
  print '<form method="post" action="'.$_SERVER['PHP_SELF'].'"><input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="save"><input type="hidden" name="orderid" value="'.$order->id.'">';
  print '<table class="border centpercent"><tr><td class="titlefield">'.$langs->trans('Order').'</td><td>'.$order->getNomUrl(1).'</td></tr><tr><td>'.$langs->trans('ThirdParty').'</td><td>'.$order->thirdparty->getNomUrl(1).'</td></tr><tr><td>'.$langs->trans('CompletionDate').'</td><td><input type="date" name="date_completion" value="'.dol_print_date(dol_now(),'%Y-%m-%d').'"></td></tr></table><br>';
