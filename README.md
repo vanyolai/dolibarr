@@ -1,15 +1,19 @@
 # Dolibarr Completion Certificate
 
-Dolibarr 23 module for creating completion certificates from customer orders.
+Dolibarr 23 module for creating and managing completion certificates from customer orders.
 
-## MVP
-- Adds **Create completion certificate** to validated customer orders.
-- Copies order lines while allowing certified quantity per line.
-- Stores an independent certificate with draft/validated status.
-- Keeps source order and source order-line relations.
-- Generates a printable PDF after validation.
-- Supports Hungarian and English UI labels.
+## Features
 
-Module path: `htdocs/custom/completioncertificate`.
+- Native **Create completion certificate** action on validated customer orders.
+- Dedicated **Completion certificates** order tab with native Dolibarr count badge.
+- Partial completion quantities with protection against over-certification.
+- Native Dolibarr object links between customer orders and completion certificates.
+- Draft, validated and canceled lifecycle.
+- Draft editing and controlled reopening after cancellation.
+- Native Dolibarr PDF document model with automatic regeneration and status watermark.
+- Native Dolibarr document block for generated files.
+- Native Dolibarr email composition and sending flow with PDF attachment.
+- Delete support for draft and canceled certificates.
+- Hungarian and English UI labels.
 
-Current development branch: `feature/completion-certificate`.
+Module path inside Dolibarr: `htdocs/custom/completioncertificate`.
