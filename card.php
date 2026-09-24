@@ -1,71 +1,208 @@
 <?php
+/* Copyright (C) 2026 Krisztian Vanyolai */
+
 require '../../main.inc.php';
 require_once DOL_DOCUMENT_ROOT.'/commande/class/commande.class.php';
-$langs->loadLangs(array('orders','completioncertificate@completioncertificate'));
-if (!$user->hasRight('completioncertificate','read')) accessforbidden();
-$id=GETPOSTINT('id'); $orderid=GETPOSTINT('orderid'); $action=GETPOST('action','aZ09');
-function cc_ref($db){ global $conf; $prefix='TI-'.date('Y').'-'; $sql="SELECT MAX(CAST(SUBSTRING(ref,9) AS UNSIGNED)) n FROM ".MAIN_DB_PREFIX."completioncertificate WHERE entity=".(int)$conf->entity." AND ref LIKE '".$db->escape($prefix)."%'"; $r=$db->query($sql); $n=1; if($r && ($o=$db->fetch_object($r))) $n=((int)$o->n)+1; return $prefix.str_pad((string)$n,4,'0',STR_PAD_LEFT); }
-function cc_plain_line_text($value)
-{
- $value = (string) $value;
- $value = preg_replace('/<br\\s*\\/?>/i', "\n", $value);
- $value = preg_replace('/<\\/p>/i', "\n", $value);
- $value = strip_tags($value);
- $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
- $value = str_replace("\r", '', $value);
- return trim($value);
-}
-function cc_line_description($line)
-{
- $ref = trim((string) ($line->product_ref ?? $line->ref ?? ''));
- $label = trim((string) ($line->label ?? ''));
- if ($label === '') $label = trim((string) ($line->product_label ?? $line->libelle ?? ''));
- $desc = cc_plain_line_text($line->desc ?? $line->description ?? '');
+dol_include_once('/completioncertificate/class/completioncertificate.class.php');
 
- $main = $ref;
- if ($label !== '') {
-  $main .= ($main !== '' ? ' - ' : '').$label;
- }
- if ($main === '') return $desc;
- if ($desc !== '' && $desc !== $label && $desc !== $main) {
-  $main .= "\n".$desc;
- }
- return $main;
+$langs->loadLangs(array('orders', 'completioncertificate@completioncertificate'));
+
+if (!$user->hasRight('completioncertificate', 'read')) {
+	accessforbidden();
 }
-if ($action==='save' && $user->hasRight('completioncertificate','write')) {
- if (!checkToken()) accessforbidden();
- $orderid=GETPOSTINT('orderid'); $order=new Commande($db); if($order->fetch($orderid)<=0) accessforbidden();
- $date=GETPOST('date_completion','alpha'); $note=GETPOST('note_public','restricthtml'); $ref=cc_ref($db);
- $db->begin();
- $sql="INSERT INTO ".MAIN_DB_PREFIX."completioncertificate(entity,ref,fk_soc,fk_commande,date_completion,note_public,status,fk_user_author,datec) VALUES(".(int)$conf->entity.",'".$db->escape($ref)."',".(int)$order->socid.",".(int)$order->id.",'".$db->escape($date)."','".$db->escape($note)."',0,".(int)$user->id.",'".$db->idate(dol_now())."')";
- if(!$db->query($sql)){ $db->rollback(); setEventMessages($db->lasterror(),null,'errors'); } else {
-  $id=(int)$db->last_insert_id(MAIN_DB_PREFIX.'completioncertificate');
-  $order->getLinesArray(); $ok=true;
-  foreach($order->lines as $i=>$line){ $q=(float)GETPOST('qty_'.$line->id,'alphanohtml'); if($q<0) $q=0; if($q>(float)$line->qty) $q=(float)$line->qty;
-   if($q==0) continue;
-   $desc=cc_line_description($line);
-   $sql="INSERT INTO ".MAIN_DB_PREFIX."completioncertificate_line(fk_completioncertificate,fk_commandedet,fk_product,description,qty_ordered,qty_certified,rang) VALUES(".$id.",".(int)$line->id.",".(!empty($line->fk_product)?(int)$line->fk_product:'NULL').",'".$db->escape($desc)."',".((float)$line->qty).",".$q.",".(int)$line->rang.")";
-   if(!$db->query($sql)){ $ok=false; break; }
-  }
-  if($ok){$db->commit(); header('Location: '.dol_buildpath('/completioncertificate/card.php',1).'?id='.$id); exit;} else {$db->rollback(); setEventMessages($db->lasterror(),null,'errors');}
- }
+
+$id = GETPOSTINT('id');
+$orderId = GETPOSTINT('orderid');
+$action = GETPOST('action', 'aZ09');
+
+$certificate = new CompletionCertificate($db);
+
+if ($id > 0 && $action !== 'save') {
+	$result = $certificate->fetch($id);
+	if ($result <= 0) {
+		accessforbidden();
+	}
 }
-if ($action==='validate' && $id && $user->hasRight('completioncertificate','write')) { if(!checkToken()) accessforbidden(); $db->query("UPDATE ".MAIN_DB_PREFIX."completioncertificate SET status=1,fk_user_valid=".(int)$user->id." WHERE rowid=".(int)$id." AND entity=".(int)$conf->entity); header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id); exit; }
-llxHeader('',$langs->trans('CompletionCertificate'));
-print load_fiche_titre($langs->trans('CompletionCertificate'),'','check-circle');
-if ($orderid > 0 && !$id) {
- $order=new Commande($db); if($order->fetch($orderid)<=0) accessforbidden(); $order->fetch_thirdparty(); $order->getLinesArray();
- print '<form method="post" action="'.$_SERVER['PHP_SELF'].'"><input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="save"><input type="hidden" name="orderid" value="'.$order->id.'">';
- print '<table class="border centpercent"><tr><td class="titlefield">'.$langs->trans('Order').'</td><td>'.$order->getNomUrl(1).'</td></tr><tr><td>'.$langs->trans('ThirdParty').'</td><td>'.$order->thirdparty->getNomUrl(1).'</td></tr><tr><td>'.$langs->trans('CompletionDate').'</td><td><input type="date" name="date_completion" value="'.dol_print_date(dol_now(),'%Y-%m-%d').'"></td></tr></table><br>';
- print '<table class="noborder centpercent"><tr class="liste_titre"><td>'.$langs->trans('Description').'</td><td class="right">'.$langs->trans('OrderedQty').'</td><td class="right">'.$langs->trans('CertifiedQty').'</td></tr>';
- foreach($order->lines as $line){$d=cc_line_description($line); print '<tr><td>'.dol_htmlentitiesbr($d).'</td><td class="right">'.price($line->qty).'</td><td class="right"><input class="width75 right" name="qty_'.$line->id.'" value="'.price2num($line->qty).'"></td></tr>';}
- print '</table><br><label>'.$langs->trans('NotePublic').'</label><br><textarea class="quatrevingtpercent" rows="4" name="note_public"></textarea><div class="center"><input class="button button-save" type="submit" value="'.$langs->trans('Create').'"></div></form>';
-} elseif ($id) {
- $sql="SELECT c.*,s.nom socname,co.ref orderref FROM ".MAIN_DB_PREFIX."completioncertificate c JOIN ".MAIN_DB_PREFIX."societe s ON s.rowid=c.fk_soc JOIN ".MAIN_DB_PREFIX."commande co ON co.rowid=c.fk_commande WHERE c.rowid=".(int)$id." AND c.entity=".(int)$conf->entity;
- $r=$db->query($sql); $c=$r?$db->fetch_object($r):null; if(!$c) accessforbidden();
- print '<table class="border centpercent"><tr><td class="titlefield">'.$langs->trans('Ref').'</td><td>'.dol_escape_htmltag($c->ref).'</td></tr><tr><td>'.$langs->trans('ThirdParty').'</td><td>'.dol_escape_htmltag($c->socname).'</td></tr><tr><td>'.$langs->trans('Order').'</td><td>'.dol_escape_htmltag($c->orderref).'</td></tr><tr><td>'.$langs->trans('CompletionDate').'</td><td>'.dol_print_date($db->jdate($c->date_completion),'day').'</td></tr><tr><td>'.$langs->trans('Status').'</td><td>'.($c->status?$langs->trans('Validated'):$langs->trans('Draft')).'</td></tr></table><br>';
- $r=$db->query("SELECT * FROM ".MAIN_DB_PREFIX."completioncertificate_line WHERE fk_completioncertificate=".(int)$id." ORDER BY rang,rowid"); print '<table class="noborder centpercent"><tr class="liste_titre"><td>'.$langs->trans('Description').'</td><td class="right">'.$langs->trans('OrderedQty').'</td><td class="right">'.$langs->trans('CertifiedQty').'</td></tr>'; while($r && ($l=$db->fetch_object($r))) print '<tr><td>'.dol_htmlentitiesbr($l->description).'</td><td class="right">'.price($l->qty_ordered).'</td><td class="right">'.price($l->qty_certified).'</td></tr>'; print '</table>';
- print '<div class="tabsAction">'; if(!$c->status && $user->hasRight('completioncertificate','write')) print dolGetButtonAction('',$langs->trans('Validate'),'default',$_SERVER['PHP_SELF'].'?id='.$id.'&action=validate&token='.newToken(),''); if($c->status) print dolGetButtonAction('',$langs->trans('PDF'),'default',dol_buildpath('/completioncertificate/pdf.php',1).'?id='.$id,''); print '</div>';
- if(!empty($c->note_public)) print '<br><div class="opacitymedium">'.$langs->trans('NotePublic').'</div><div class="wordbreak">'.dol_htmlentitiesbr($c->note_public).'</div>';
+
+if ($action === 'save') {
+	if (!$user->hasRight('completioncertificate', 'write')) {
+		accessforbidden();
+	}
+	if (!checkToken()) {
+		accessforbidden();
+	}
+
+	$orderId = GETPOSTINT('orderid');
+	$order = new Commande($db);
+	if ($order->fetch($orderId) <= 0 || (int) $order->status <= 0) {
+		accessforbidden();
+	}
+
+	$requestedQty = array();
+	foreach ($order->lines as $line) {
+		$rawQty = GETPOST('qty_'.((int) $line->id), 'alphanohtml');
+		$requestedQty[(int) $line->id] = (float) price2num($rawQty);
+	}
+
+	$dateCompletion = GETPOST('date_completion', 'alpha');
+	if ($dateCompletion === '') {
+		$dateCompletion = dol_print_date(dol_now(), '%Y-%m-%d');
+	}
+	$notePublic = GETPOST('note_public', 'restricthtml');
+
+	$newId = $certificate->createFromOrder($order, $user, $dateCompletion, $notePublic, $requestedQty);
+	if ($newId > 0) {
+		header('Location: '.dol_buildpath('/completioncertificate/card.php', 1).'?id='.$newId);
+		exit;
+	}
+
+	setEventMessages($certificate->error, null, 'errors');
+	$action = 'create';
 }
-llxFooter(); $db->close();
+
+if ($action === 'validate' && $id > 0) {
+	if (!$user->hasRight('completioncertificate', 'write')) {
+		accessforbidden();
+	}
+	if (!checkToken()) {
+		accessforbidden();
+	}
+
+	if ($certificate->validate($user) > 0) {
+		header('Location: '.$_SERVER['PHP_SELF'].'?id='.$id);
+		exit;
+	}
+	setEventMessages($certificate->error, null, 'errors');
+}
+
+if ($action === 'delete' && $id > 0) {
+	if (!$user->hasRight('completioncertificate', 'delete')) {
+		accessforbidden();
+	}
+	if (!checkToken()) {
+		accessforbidden();
+	}
+
+	$sourceOrderId = (int) $certificate->fk_commande;
+	if ($certificate->deleteDraft() > 0) {
+		header('Location: '.DOL_URL_ROOT.'/commande/card.php?id='.$sourceOrderId);
+		exit;
+	}
+	setEventMessages($certificate->error, null, 'errors');
+}
+
+llxHeader('', $langs->trans('CompletionCertificate'));
+print load_fiche_titre($langs->trans('CompletionCertificate'), '', 'check-circle');
+
+if ($orderId > 0 && $id <= 0) {
+	$order = new Commande($db);
+	if ($order->fetch($orderId) <= 0 || (int) $order->status <= 0) {
+		accessforbidden();
+	}
+	$order->fetch_thirdparty();
+
+	$usedQuantities = $certificate->getUsedQuantitiesForOrder($orderId);
+
+	print '<form method="post" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
+	print '<input type="hidden" name="token" value="'.newToken().'">';
+	print '<input type="hidden" name="action" value="save">';
+	print '<input type="hidden" name="orderid" value="'.((int) $order->id).'">';
+
+	print '<table class="border centpercent">';
+	print '<tr><td class="titlefield">'.$langs->trans('Order').'</td><td>'.$order->getNomUrl(1).'</td></tr>';
+	print '<tr><td>'.$langs->trans('ThirdParty').'</td><td>'.$order->thirdparty->getNomUrl(1).'</td></tr>';
+	print '<tr><td>'.$langs->trans('CompletionDate').'</td><td>';
+	print '<input type="date" name="date_completion" value="'.dol_print_date(dol_now(), '%Y-%m-%d').'">';
+	print '</td></tr>';
+	print '</table>';
+	print '<br>';
+
+	print '<div class="div-table-responsive-no-min">';
+	print '<table class="noborder centpercent">';
+	print '<tr class="liste_titre">';
+	print '<td>'.$langs->trans('Description').'</td>';
+	print '<td class="right">'.$langs->trans('OrderedQty').'</td>';
+	print '<td class="right">'.$langs->trans('AlreadyCertifiedQty').'</td>';
+	print '<td class="right">'.$langs->trans('RemainingQty').'</td>';
+	print '<td class="right">'.$langs->trans('CertifiedQty').'</td>';
+	print '</tr>';
+
+	foreach ($order->lines as $line) {
+		$lineId = (int) $line->id;
+		$orderedQty = (float) $line->qty;
+		$usedQty = (float) ($usedQuantities[$lineId] ?? 0.0);
+		$remainingQty = max(0.0, $orderedQty - $usedQty);
+		$description = CompletionCertificate::buildOrderLineDescription($line);
+
+		print '<tr>';
+		print '<td>'.dol_htmlentitiesbr($description).'</td>';
+		print '<td class="right">'.price($orderedQty).'</td>';
+		print '<td class="right">'.price($usedQty).'</td>';
+		print '<td class="right">'.price($remainingQty).'</td>';
+		print '<td class="right">';
+		print '<input class="width75 right" type="number" step="any" min="0" max="'.price2num($remainingQty).'"';
+		print ' name="qty_'.$lineId.'" value="'.price2num($remainingQty).'"'.($remainingQty <= 0 ? ' disabled' : '').'>';
+		print '</td>';
+		print '</tr>';
+	}
+
+	print '</table>';
+	print '</div>';
+	print '<br>';
+
+	print '<label for="note_public">'.$langs->trans('NotePublic').'</label><br>';
+	print '<textarea id="note_public" class="quatrevingtpercent" rows="4" name="note_public">'.dol_escape_htmltag(GETPOST('note_public', 'restricthtml')).'</textarea>';
+
+	print '<div class="center">';
+	print '<input class="button button-save" type="submit" value="'.$langs->trans('Create').'">';
+	print ' &nbsp; ';
+	print '<a class="button button-cancel" href="'.DOL_URL_ROOT.'/commande/card.php?id='.((int) $order->id).'">'.$langs->trans('Cancel').'</a>';
+	print '</div>';
+	print '</form>';
+} elseif ($id > 0) {
+	print '<table class="border centpercent">';
+	print '<tr><td class="titlefield">'.$langs->trans('Ref').'</td><td>'.dol_escape_htmltag($certificate->ref).'</td></tr>';
+	print '<tr><td>'.$langs->trans('ThirdParty').'</td><td>'.dol_escape_htmltag($certificate->thirdparty_name).'</td></tr>';
+	print '<tr><td>'.$langs->trans('Order').'</td><td><a href="'.DOL_URL_ROOT.'/commande/card.php?id='.((int) $certificate->fk_commande).'">'.dol_escape_htmltag($certificate->order_ref).'</a></td></tr>';
+	print '<tr><td>'.$langs->trans('CompletionDate').'</td><td>'.dol_print_date($db->jdate($certificate->date_completion), 'day').'</td></tr>';
+	print '<tr><td>'.$langs->trans('Status').'</td><td>'.($certificate->status === CompletionCertificate::STATUS_VALIDATED ? $langs->trans('Validated') : $langs->trans('Draft')).'</td></tr>';
+	print '</table>';
+	print '<br>';
+
+	print '<div class="div-table-responsive-no-min">';
+	print '<table class="noborder centpercent">';
+	print '<tr class="liste_titre">';
+	print '<td>'.$langs->trans('Description').'</td>';
+	print '<td class="right">'.$langs->trans('OrderedQty').'</td>';
+	print '<td class="right">'.$langs->trans('CertifiedQty').'</td>';
+	print '</tr>';
+	foreach ($certificate->lines as $line) {
+		print '<tr>';
+		print '<td>'.dol_htmlentitiesbr($line->description).'</td>';
+		print '<td class="right">'.price($line->qty_ordered).'</td>';
+		print '<td class="right">'.price($line->qty_certified).'</td>';
+		print '</tr>';
+	}
+	print '</table>';
+	print '</div>';
+
+	if ($certificate->note_public !== '') {
+		print '<br><div class="opacitymedium">'.$langs->trans('NotePublic').'</div>';
+		print '<div class="wordbreak">'.dol_htmlentitiesbr(strip_tags($certificate->note_public)).'</div>';
+	}
+
+	print '<div class="tabsAction">';
+	if ($certificate->status === CompletionCertificate::STATUS_DRAFT && $user->hasRight('completioncertificate', 'write')) {
+		print dolGetButtonAction('', $langs->trans('Validate'), 'default', $_SERVER['PHP_SELF'].'?id='.$id.'&action=validate&token='.newToken(), '');
+	}
+	if ($certificate->status === CompletionCertificate::STATUS_VALIDATED) {
+		print dolGetButtonAction('', $langs->trans('PDF'), 'default', dol_buildpath('/completioncertificate/pdf.php', 1).'?id='.$id, '');
+	}
+	if ($certificate->status === CompletionCertificate::STATUS_DRAFT && $user->hasRight('completioncertificate', 'delete')) {
+		print dolGetButtonAction('', $langs->trans('Delete'), 'delete', $_SERVER['PHP_SELF'].'?id='.$id.'&action=delete&token='.newToken(), '');
+	}
+	print '</div>';
+}
+
+llxFooter();
+$db->close();
