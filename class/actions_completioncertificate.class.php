@@ -1,5 +1,5 @@
 <?php
-/* Copyright (C) 2026 Krisztian Vanyolai
+/* Copyright (C) 2026 Vanyolai Krisztián <vanyolai@gmail.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,85 +20,32 @@ class ActionsCompletionCertificate extends CommonHookActions
 	}
 
 	/**
-	 * Add "Create completion certificate" to the order Create dropdown.
-	 *
-	 * Dolibarr 23 calls addMoreActionsButtons before it builds the core Create
-	 * dropdown, so the dropdown option array cannot be extended directly here.
-	 * We therefore inject one menu entry on DOM ready. The JavaScript itself is
-	 * kept in a nowdoc to avoid PHP/JavaScript quoting collisions.
+	 * Add completion certificate creation to the native order "Create" dropdown.
 	 *
 	 * @param array<string,mixed> $parameters Hook parameters
-	 * @param Commande $object Current order
+	 * @param Commande $object Current customer order
 	 * @param string $action Current action
 	 * @param HookManager $hookmanager Hook manager
 	 * @return int
 	 */
 	public function addMoreActionsButtons($parameters, &$object, &$action, $hookmanager)
 	{
-		global $langs, $user;
+		global $user, $arrayforbutaction;
 
-		if (($parameters['currentcontext'] ?? '') !== 'ordercard') {
+		if (!in_array('ordercard', explode(':', (string) ($parameters['context'] ?? '')), true)) {
 			return 0;
 		}
-		if (!is_object($object) || empty($object->id) || (int) $object->status <= 0) {
-			return 0;
-		}
-		if (!$user->hasRight('completioncertificate', 'write')) {
+		if (!is_object($object) || empty($object->id)) {
 			return 0;
 		}
 
-		$langs->load('completioncertificate@completioncertificate');
-
-		$url = dol_buildpath('/completioncertificate/card.php', 1).'?orderid='.(int) $object->id;
-		$label = $langs->transnoentities('CreateCompletionCertificate');
-
-		$urlJson = json_encode($url, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-		$labelJson = json_encode($label, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-
-		if ($urlJson === false || $labelJson === false) {
-			return 0;
-		}
-
-		$javascript = <<<'JS'
-jQuery(function ($) {
-	var targetUrl = __TARGET_URL__;
-	var targetLabel = __TARGET_LABEL__;
-
-	$(".tabsAction .dropdown-holder .dropdown-content").each(function () {
-		var content = $(this);
-
-		if (content.find("[data-completioncertificate-create]").length) {
-			return;
-		}
-
-		var isOrderCreateMenu = content.find(
-			'a[href*="/fourn/commande/card.php?action=create"],' +
-			'a[href*="/contrat/card.php?action=create"],' +
-			'a[href*="/expedition/shipment.php"],' +
-			'a[href*="/compta/facture/card.php?action=create"]'
-		).length > 0;
-
-		if (!isOrderCreateMenu) {
-			return;
-		}
-
-		$("<a>", {
-			"class": "dropdown-item",
-			"href": targetUrl,
-			"text": targetLabel,
-			"data-completioncertificate-create": "1"
-		}).appendTo(content);
-	});
-});
-JS;
-
-		$javascript = str_replace(
-			array('__TARGET_URL__', '__TARGET_LABEL__'),
-			array($urlJson, $labelJson),
-			$javascript
+		$arrayforbutaction[] = array(
+			'lang' => 'completioncertificate@completioncertificate',
+			'enabled' => ((int) $object->status > 0),
+			'perm' => $user->hasRight('completioncertificate', 'write'),
+			'label' => 'CreateCompletionCertificate',
+			'url' => '/completioncertificate/card.php?orderid='.((int) $object->id),
 		);
-
-		print '<script nonce="'.getNonce().'">'.$javascript.'</script>';
 
 		return 0;
 	}
