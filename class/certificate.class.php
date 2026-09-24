@@ -436,6 +436,10 @@ class Certificate extends CommonObject
 			$this->error = $langs->trans('CompletionCertificateNotDraft');
 			return -1;
 		}
+		if (!$this->canReserveCurrentQuantities()) {
+			$this->error = $langs->trans('CompletionCertificateQuantityNoLongerAvailable');
+			return -2;
+		}
 
 		$sql = 'UPDATE '.$this->db->prefix().'completioncertificate';
 		$sql .= ' SET status = '.self::STATUS_VALIDATED;
@@ -567,12 +571,12 @@ class Certificate extends CommonObject
 		global $langs;
 
 		if ($this->status === self::STATUS_VALIDATED) {
-			return $langs->trans('Validated');
+			return dolGetStatus($langs->trans('Validated'), '', '', 'status4', $mode);
 		}
 		if ($this->status === self::STATUS_CANCELED) {
-			return $langs->trans('Canceled');
+			return dolGetStatus($langs->trans('Canceled'), '', '', 'status9', $mode);
 		}
-		return $langs->trans('Draft');
+		return dolGetStatus($langs->trans('Draft'), '', '', 'status0', $mode);
 	}
 
 	/**
