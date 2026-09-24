@@ -24,7 +24,7 @@ class modCompletionCertificate extends DolibarrModules
 		$this->description = 'ModuleCompletionCertificateDesc';
 		$this->editor_name = 'Krisztian Vanyolai';
 		$this->editor_url = 'https://github.com/vanyolai/dolibarr-completioncertificate';
-		$this->version = '0.3.2';
+		$this->version = '0.3.3';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'check-circle';
 
@@ -63,7 +63,7 @@ class modCompletionCertificate extends DolibarrModules
 
 		$this->tabs = array();
 		$this->tabs[] = array(
-			'data' => 'order:+completioncertificates:CompletionCertificates:completioncertificate@completioncertificate:$user->hasRight("completioncertificate", "read"):/completioncertificate/order.php?id=__ID__'
+			'data' => 'order:+completioncertificates:CompletionCertificates,Certificate,/completioncertificate/class/certificate.class.php,getOrderCertificateCount:completioncertificate@completioncertificate:$user->hasRight("completioncertificate", "read"):/completioncertificate/order.php?id=__ID__'
 		);
 		$this->dictionaries = array();
 		$this->boxes = array();
