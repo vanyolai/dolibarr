@@ -53,6 +53,12 @@ class CompletionCertificate
 		$this->db = $db;
 	}
 
+	/**
+	 * Load a certificate and its lines.
+	 *
+	 * @param int $id Certificate ID
+	 * @return int 1 if found, 0 if not found, -1 on error
+	 */
 	public function fetch($id)
 	{
 		global $conf;
@@ -92,6 +98,11 @@ class CompletionCertificate
 		return $this->fetchLines();
 	}
 
+	/**
+	 * Load certificate lines.
+	 *
+	 * @return int 1 on success, -1 on error
+	 */
 	public function fetchLines()
 	{
 		$this->lines = array();
@@ -114,6 +125,13 @@ class CompletionCertificate
 		return 1;
 	}
 
+	/**
+	 * Return already reserved/certified quantity by order-line ID.
+	 * Draft and validated certificates both reserve quantity; canceled ones do not.
+	 *
+	 * @param int $orderId Customer order ID
+	 * @return array<int,float>
+	 */
 	public function getUsedQuantitiesForOrder($orderId)
 	{
 		global $conf;
@@ -141,6 +159,16 @@ class CompletionCertificate
 		return $result;
 	}
 
+	/**
+	 * Create a draft completion certificate from an order.
+	 *
+	 * @param Commande $order Source order, already fetched
+	 * @param User $user Author
+	 * @param string $dateCompletion YYYY-MM-DD
+	 * @param string $notePublic Public note
+	 * @param array<int,float> $requestedQty Requested quantity by order-line ID
+	 * @return int New ID, negative value on error
+	 */
 	public function createFromOrder($order, $user, $dateCompletion, $notePublic, array $requestedQty)
 	{
 		global $conf, $langs;
@@ -246,6 +274,12 @@ class CompletionCertificate
 		return $newId;
 	}
 
+	/**
+	 * Validate a draft certificate.
+	 *
+	 * @param User $user Validator
+	 * @return int 1 on success, negative value on error
+	 */
 	public function validate($user)
 	{
 		global $conf, $langs;
@@ -272,6 +306,11 @@ class CompletionCertificate
 		return 1;
 	}
 
+	/**
+	 * Delete a draft certificate and its lines.
+	 *
+	 * @return int 1 on success, negative value on error
+	 */
 	public function deleteDraft()
 	{
 		global $conf, $langs;
@@ -302,6 +341,12 @@ class CompletionCertificate
 		return 1;
 	}
 
+	/**
+	 * Build the visible line description from Dolibarr order-line fields.
+	 *
+	 * @param object $line Order line
+	 * @return string
+	 */
 	public static function buildOrderLineDescription($line)
 	{
 		$ref = trim((string) ($line->product_ref ?? $line->ref ?? ''));
@@ -319,26 +364,34 @@ class CompletionCertificate
 			return $description;
 		}
 		if ($description !== '' && $description !== $label && $description !== $main) {
-			$main .= "
-".$description;
+			$main .= "\n".$description;
 		}
 
 		return $main;
 	}
 
+	/**
+	 * Convert Dolibarr HTML descriptions to readable plain text.
+	 *
+	 * @param mixed $value HTML/text value
+	 * @return string
+	 */
 	private static function plainText($value)
 	{
 		$value = (string) $value;
-		$value = preg_replace('/<br\s*\/?>/i', "
-", $value);
-		$value = preg_replace('/<\/p>/i', "
-", $value);
+		$value = preg_replace('/<br\s*\/?>/i', "\n", $value);
+		$value = preg_replace('/<\/p>/i', "\n", $value);
 		$value = strip_tags($value);
 		$value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-		$value = str_replace("", '', $value);
+		$value = str_replace("\r", '', $value);
 		return trim($value);
 	}
 
+	/**
+	 * Generate the next reference for the current entity/year.
+	 *
+	 * @return string Empty string on error
+	 */
 	private function getNextReference()
 	{
 		global $conf;
