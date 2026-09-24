@@ -14,3 +14,5 @@ CompletionCertificateInvalidDate=Invalid completion date.
 CompletionCertificateNoQuantity=There is no remaining quantity available to certify.
 CompletionCertificateNotDraft=The completion certificate is no longer a draft.
 CompletionCertificateDeleteDraftOnly=Only draft completion certificates can be deleted.
+CompletionCertificateStatement=We certify completion of the following items in the quantities shown.
+CompletionCertificateLinkWarning=The completion certificate was created, but its native Dolibarr link to the order could not be created.
