@@ -162,9 +162,9 @@ class pdf_standard_certificate extends ModelePDFCertificate
 		$pdf->Line($x, $y + 14, $x + $signatureWidth, $y + 14);
 		$pdf->Line($x + $signatureWidth + $gap, $y + 14, $x + ($signatureWidth * 2) + $gap, $y + 14);
 		$pdf->SetXY($x, $y + 15);
-		$pdf->Cell($signatureWidth, 5, $outputlangs->transnoentities('ContractorSignature'), 0, 0, 'C');
+		$pdf->Cell($signatureWidth, 5, $outputlangs->transnoentities('Contractor'), 0, 0, 'C');
 		$pdf->SetXY($x + $signatureWidth + $gap, $y + 15);
-		$pdf->Cell($signatureWidth, 5, $outputlangs->transnoentities('CustomerSignature'), 0, 1, 'C');
+		$pdf->Cell($signatureWidth, 5, $outputlangs->transnoentities('Customer'), 0, 1, 'C');
 
 		$this->_pagefoot($pdf, $object, $outputlangs, 0);
 
