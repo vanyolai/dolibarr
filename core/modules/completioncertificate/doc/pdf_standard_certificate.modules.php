@@ -193,9 +193,9 @@ class pdf_standard_certificate extends ModelePDFCertificate
 
 		pdf_pagehead($pdf, $outputlangs, $this->page_hauteur);
 
-		if ((int) $object->status === Certificate::STATUS_DRAFT) {
+		if ((int) $object->status === $object::STATUS_DRAFT) {
 			pdf_watermark($pdf, $outputlangs, $this->page_hauteur, $this->page_largeur, 'mm', $outputlangs->transnoentities('Draft'));
-		} elseif ((int) $object->status === Certificate::STATUS_CANCELED) {
+		} elseif ((int) $object->status === $object::STATUS_CANCELED) {
 			pdf_watermark($pdf, $outputlangs, $this->page_hauteur, $this->page_largeur, 'mm', $outputlangs->transnoentities('Canceled'));
 		}
 
