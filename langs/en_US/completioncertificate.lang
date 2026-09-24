@@ -1,0 +1,8 @@
+ModuleCompletionCertificateDesc=Create completion certificates from customer orders
+CompletionCertificate=Completion certificate
+CreateCompletionCertificate=Create completion certificate
+CompletionDate=Completion date
+OrderedQty=Ordered quantity
+CertifiedQty=Certified quantity
+ContractorSignature=Contractor
+CustomerSignature=Customer
