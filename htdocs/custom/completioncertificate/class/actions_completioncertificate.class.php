@@ -32,30 +32,43 @@ class ActionsCompletionCertificate extends CommonHookActions
 		$createLabelJson = json_encode($createLabel, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
 		// Dolibarr 23 builds the order "Create" dropdown after this hook runs and
-		// does not expose its option array to hooks. Insert our entry once the DOM
-		// is ready, keeping the core untouched.
+		// does not expose its option array to hooks. Identify that dropdown by
+		// its core create links instead of by translated button text.
 		print '<script nonce="'.getNonce().'">
 		jQuery(function($) {
 			var targetUrl = '.$urlJson.';
 			var targetLabel = '.$labelJson.';
-			var createLabel = '.$createLabelJson.';
-			$(".tabsAction .dropdown-holder").each(function() {
-				var holder = $(this);
-				var toggle = holder.children(".dropdown-toggle").first();
-				if ($.trim(toggle.text()) !== createLabel) {
-					return;
-				}
-				var content = holder.children(".dropdown-content").first();
-				if (!content.length || content.find("[data-completioncertificate-create]").length) {
-					return;
-				}
-				$("<a>", {
-					"class": "dropdown-item",
-					"href": targetUrl,
-					"text": targetLabel,
-					"data-completioncertificate-create": "1"
-				}).appendTo(content);
-			});
+
+			function injectCompletionCertificateItem() {
+				$(".tabsAction .dropdown-holder .dropdown-content").each(function() {
+					var content = $(this);
+					if (content.find("[data-completioncertificate-create]").length) {
+						return;
+					}
+
+					var isOrderCreateMenu = content.find(
+						'a[href*="/fourn/commande/card.php"],' +
+						'a[href*="/contrat/card.php"],' +
+						'a[href*="/expedition/shipment.php"],' +
+						'a[href*="/compta/facture/card.php"]'
+					).length > 0;
+
+					if (!isOrderCreateMenu) {
+						return;
+					}
+
+					$("<a>", {
+						"class": "dropdown-item",
+						"href": targetUrl,
+						"text": targetLabel,
+						"data-completioncertificate-create": "1"
+					}).appendTo(content);
+				});
+			}
+
+			injectCompletionCertificateItem();
+			window.setTimeout(injectCompletionCertificateItem, 0);
+			window.setTimeout(injectCompletionCertificateItem, 100);
 		});
 		</script>';
 
