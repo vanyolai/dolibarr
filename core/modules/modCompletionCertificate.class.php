@@ -95,6 +95,8 @@ class modCompletionCertificate extends DolibarrModules
 
 	public function init($options = '')
 	{
+		global $conf;
+
 		$result = $this->_load_tables('/completioncertificate/sql/');
 		if ($result <= 0) {
 			return -1;
