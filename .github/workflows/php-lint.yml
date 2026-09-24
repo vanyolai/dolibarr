@@ -36,3 +36,13 @@ jobs:
       - name: Guard native order tab badge
         run: |
           grep -F "CompletionCertificates,Certificate,/completioncertificate/class/certificate.class.php,getOrderCertificateCount" core/modules/modCompletionCertificate.class.php
+
+      - name: Guard native confirmation flows
+        run: |
+          grep -F "\$deleteUrl = '';" card.php
+          grep -F "\$deleteButtonId = 'action-delete';" card.php
+          grep -F "'InvalidateCompletionCertificate'), 'default'" card.php
+          if grep -nF "'InvalidateCompletionCertificate'), 'delete'" card.php; then
+            echo "Invalidation is a status transition, not a delete-style action."
+            exit 1
+          fi
