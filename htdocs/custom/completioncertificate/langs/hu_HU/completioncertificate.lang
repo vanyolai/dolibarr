@@ -1,0 +1,8 @@
+ModuleCompletionCertificateDesc=Teljesítésigazolások létrehozása vevői megrendelésekből
+CompletionCertificate=Teljesítésigazolás
+CreateCompletionCertificate=Teljesítésigazolás létrehozása
+CompletionDate=Teljesítés dátuma
+OrderedQty=Megrendelt mennyiség
+CertifiedQty=Igazolt mennyiség
+ContractorSignature=Vállalkozó
+CustomerSignature=Megrendelő
