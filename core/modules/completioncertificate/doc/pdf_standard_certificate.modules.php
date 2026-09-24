@@ -85,7 +85,13 @@ class pdf_standard_certificate extends ModelePDFCertificate
 		$pdf->SetTitle($object->ref);
 		$pdf->SetSubject($outputlangs->transnoentities('CompletionCertificate'));
 		$pdf->SetMargins($this->marge_gauche, $this->marge_haute, $this->marge_droite);
-		$pdf->SetAutoPageBreak(true, $this->marge_basse + 18);
+		$pdf->setAutoPageBreak(true, 0);
+
+		$showFooterDetails = getDolGlobalInt('MAIN_GENERATE_DOCUMENTS_SHOW_FOOT_DETAILS') ? 1 : 0;
+		$heightForFooter = $this->marge_basse + 18 + ($showFooterDetails ? 6 : 0);
+		$tableWidth = $this->page_largeur - $this->marge_gauche - $this->marge_droite;
+		$qtyWidth = 36;
+		$descWidth = $tableWidth - (2 * $qtyWidth);
 
 		if (getDolGlobalString('MAIN_ADD_PDF_BACKGROUND')) {
 			$logodir = $conf->mycompany->dir_output;
@@ -113,10 +119,10 @@ class pdf_standard_certificate extends ModelePDFCertificate
 
 		foreach ($object->lines as $line) {
 			$description = trim((string) $line->description);
-			$descHeight = max(7.0, (float) $pdf->getStringHeight(130, $description));
+			$descHeight = max(7.0, (float) $pdf->getStringHeight($descWidth, $description));
 			$rowHeight = max(7.0, $descHeight);
 
-			if ($pdf->GetY() + $rowHeight > ($this->page_hauteur - $this->marge_basse - 28)) {
+			if ($pdf->GetY() + $rowHeight > ($this->page_hauteur - $heightForFooter - 5)) {
 				$this->_pagefoot($pdf, $object, $outputlangs, 1);
 				$pdf->AddPage();
 				if (!empty($tplidx)) {
@@ -130,9 +136,9 @@ class pdf_standard_certificate extends ModelePDFCertificate
 			$x = $this->marge_gauche;
 			$y = $pdf->GetY();
 
-			$pdf->MultiCell(130, $rowHeight, $outputlangs->convToOutputCharset($description), 1, 'L', false, 0, $x, $y);
-			$pdf->MultiCell(25, $rowHeight, price($line->qty_ordered), 1, 'R', false, 0, $x + 130, $y);
-			$pdf->MultiCell(25, $rowHeight, price($line->qty_certified), 1, 'R', false, 1, $x + 155, $y);
+			$pdf->MultiCell($descWidth, $rowHeight, $outputlangs->convToOutputCharset($description), 1, 'L', false, 0, $x, $y);
+			$pdf->MultiCell($qtyWidth, $rowHeight, price($line->qty_ordered), 1, 'R', false, 0, $x + $descWidth, $y);
+			$pdf->MultiCell($qtyWidth, $rowHeight, price($line->qty_certified), 1, 'R', false, 1, $x + $descWidth + $qtyWidth, $y);
 			$pdf->SetY($y + $rowHeight);
 		}
 
@@ -144,7 +150,7 @@ class pdf_standard_certificate extends ModelePDFCertificate
 			$pdf->MultiCell(0, 5, trim(strip_tags($object->note_public)), 0, 'L');
 		}
 
-		if ($pdf->GetY() > ($this->page_hauteur - 65)) {
+		if ($pdf->GetY() > ($this->page_hauteur - $heightForFooter - 38)) {
 			$this->_pagefoot($pdf, $object, $outputlangs, 1);
 			$pdf->AddPage();
 			if (!empty($tplidx)) {
@@ -167,6 +173,9 @@ class pdf_standard_certificate extends ModelePDFCertificate
 		$pdf->Cell($signatureWidth, 5, $outputlangs->transnoentities('Customer'), 0, 1, 'C');
 
 		$this->_pagefoot($pdf, $object, $outputlangs, 0);
+		if (method_exists($pdf, 'AliasNbPages')) {
+			$pdf->AliasNbPages();
+		}
 
 		$pdf->Close();
 		$pdf->Output($file, 'F');
@@ -273,15 +282,18 @@ class pdf_standard_certificate extends ModelePDFCertificate
 
 	protected function _tablehead(&$pdf, $outputlangs)
 	{
-		$fontSize = pdf_getPDFFontSize($outputlangs) - 1;
+		$fontSize = max(7, pdf_getPDFFontSize($outputlangs) - 2);
 		$pdf->SetFont(pdf_getPDFFont($outputlangs), 'B', $fontSize);
 		$pdf->SetFillColor(235, 235, 235);
 
-		$x = $this->marge_gauche;
-		$pdf->SetX($x);
-		$pdf->Cell(130, 7, $outputlangs->transnoentities('Description'), 1, 0, 'L', true);
-		$pdf->Cell(25, 7, $outputlangs->transnoentities('OrderedQty'), 1, 0, 'R', true);
-		$pdf->Cell(25, 7, $outputlangs->transnoentities('CertifiedQty'), 1, 1, 'R', true);
+		$tableWidth = $this->page_largeur - $this->marge_gauche - $this->marge_droite;
+		$qtyWidth = 36;
+		$descWidth = $tableWidth - (2 * $qtyWidth);
+
+		$pdf->SetX($this->marge_gauche);
+		$pdf->Cell($descWidth, 8, $outputlangs->transnoentities('Description'), 1, 0, 'L', true);
+		$pdf->Cell($qtyWidth, 8, $outputlangs->transnoentities('OrderedQty'), 1, 0, 'C', true);
+		$pdf->Cell($qtyWidth, 8, $outputlangs->transnoentities('CertifiedQty'), 1, 1, 'C', true);
 	}
 
 	protected function _pagefoot(&$pdf, $object, $outputlangs, $hidefreetext = 0)
@@ -297,7 +309,8 @@ class pdf_standard_certificate extends ModelePDFCertificate
 			$this->page_hauteur,
 			$object,
 			$showdetails,
-			$hidefreetext
+			$hidefreetext,
+			$this->page_largeur
 		);
 	}
 }
