@@ -25,3 +25,14 @@ jobs:
             exit 1
           fi
           grep -F "'urlroot' => dol_buildpath('/completioncertificate/card.php', 1)" class/actions_completioncertificate.class.php
+
+      - name: Guard PDF footer pagebreak handling
+        run: |
+          grep -F "setAutoPageBreak(true, 0);" core/modules/completioncertificate/doc/pdf_standard_certificate.modules.php
+          if grep -nE "SetAutoPageBreak\(true,[[:space:]]*\$this->marge_basse" core/modules/completioncertificate/doc/pdf_standard_certificate.modules.php; then
+            echo "Dolibarr pdf_pagefoot must not be rendered inside an automatic bottom-margin break zone."
+            exit 1
+          fi
+      - name: Guard native order tab badge
+        run: |
+          grep -F "CompletionCertificates,Certificate,/completioncertificate/class/certificate.class.php,getOrderCertificateCount" core/modules/modCompletionCertificate.class.php
