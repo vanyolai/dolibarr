@@ -49,8 +49,8 @@ class ActionsCompletionCertificate extends CommonHookActions
 
 		$langs->load('completioncertificate@completioncertificate');
 
-		$url = dol_buildpath('/completioncertificate/card.php', 1).'?action=create&orderid='.(int) $object->id;
-		$label = $langs->trans('CreateCompletionCertificate');
+		$url = dol_buildpath('/completioncertificate/card.php', 1).'?orderid='.(int) $object->id;
+		$label = $langs->transnoentities('CreateCompletionCertificate');
 
 		$urlJson = json_encode($url, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 		$labelJson = json_encode($label, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
