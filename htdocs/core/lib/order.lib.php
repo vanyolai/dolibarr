@@ -235,7 +235,7 @@ function order_admin_prepare_head()
  */
 function getOrderAgendaCreateUrl(Commande $object, $backtopage = '')
 {
-	global $db;
+	global $db, $langs;
 
 	if ($backtopage === '') {
 		$backtopage = '/commande/card.php?id='.$object->id;
@@ -251,6 +251,7 @@ function getOrderAgendaCreateUrl(Commande $object, $backtopage = '')
 	try {
 		require_once DOL_DOCUMENT_ROOT.'/core/lib/date.lib.php';
 		require_once DOL_DOCUMENT_ROOT.'/product/class/product.class.php';
+		$langs->load('companies');
 
 		if (empty($object->thirdparty) || empty($object->thirdparty->id)) {
 			$object->fetch_thirdparty();
@@ -282,10 +283,10 @@ function getOrderAgendaCreateUrl(Commande $object, $backtopage = '')
 
 		$noteParts = array();
 		if (!empty($object->thirdparty->phone)) {
-			$noteParts[] = 'Phone: '.$object->thirdparty->phone;
+			$noteParts[] = $langs->trans('Phone').': '.$object->thirdparty->phone;
 		}
 		if (!empty($object->thirdparty->phone_mobile)) {
-			$noteParts[] = 'PhoneMobile: '.$object->thirdparty->phone_mobile;
+			$noteParts[] = $langs->trans('PhoneMobile').': '.$object->thirdparty->phone_mobile;
 		}
 		$note = implode(' | ', $noteParts);
 		if ($note !== '') {
