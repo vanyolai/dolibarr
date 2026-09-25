@@ -213,7 +213,7 @@ print dol_get_fiche_end();
 
 // Actions buttons
 
-$agendaCreateUrl = getOrderAgendaCreateUrl($object);
+$agendaCreateUrl = getOrderAgendaCreateUrl($object, $_SERVER["PHP_SELF"].'?id='.$object->id);
 
 
 //print '</div>';
