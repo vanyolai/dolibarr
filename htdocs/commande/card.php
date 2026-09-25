@@ -3551,6 +3551,16 @@ if ($action == 'create' && $usercancreate) {
 					);
 				}
 
+
+				// Create Agenda event
+				$arrayforbutaction[] = array(
+					'lang' => 'agenda',
+					'enabled' => (isModEnabled('agenda') && $object->status > Commande::STATUS_DRAFT && $object->status < Commande::STATUS_CLOSED),
+					'perm' => ($user->hasRight('agenda', 'myactions', 'create') || $user->hasRight('agenda', 'allactions', 'create')),
+					'label' => 'AddAction',
+					'url' => getOrderAgendaCreateUrl($object),
+				);
+
 				// Create contract
 				$arrayforbutaction[] = array(
 					'lang' => 'contracts',
