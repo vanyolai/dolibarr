@@ -301,16 +301,16 @@ function getOrderAgendaCreateUrl(Commande $object, $backtopage = '')
 			$hasDuration = false;
 
 			foreach ($object->lines as $line) {
-				if ((int) $line->product_type !== Product::TYPE_SERVICE || empty($line->fk_product) || (float) $line->qty <= 0) {
+				if (empty($line->fk_product) || (float) $line->qty <= 0) {
 					continue;
 				}
 
 				$product = new Product($db);
-				if ($product->fetch($line->fk_product) <= 0) {
+				if ($product->fetch($line->fk_product) <= 0 || (int) $product->type !== Product::TYPE_SERVICE) {
 					continue;
 				}
 
-				// Use the Product API instead of interpreting duration units here.
+				// Use the product itself as the source of truth for service type and duration.
 				$durationHours = $product->getProductDurationHours();
 				if ($durationHours <= 0) {
 					continue;
