@@ -225,10 +225,11 @@ function order_admin_prepare_head()
 /**
  * Build URL to create an Agenda event prefilled from a customer order.
  *
- * @param  Commande  $object  Customer order
- * @return string             Relative URL to Agenda event creation form
+ * @param  Commande  $object       Customer order
+ * @param  string    $backtopage   URL to return to after Agenda event creation
+ * @return string                  Relative URL to Agenda event creation form
  */
-function getOrderAgendaCreateUrl(Commande $object)
+function getOrderAgendaCreateUrl(Commande $object, $backtopage = '')
 {
 	global $db;
 
@@ -312,7 +313,10 @@ function getOrderAgendaCreateUrl(Commande $object)
 	$url .= '&originid='.((int) $object->id);
 	$url .= '&socid='.((int) $object->socid);
 	$url .= '&label='.urlencode($label);
-	$url .= '&backtopage='.urlencode('/commande/card.php?id='.$object->id);
+	if ($backtopage === '') {
+		$backtopage = '/commande/card.php?id='.$object->id;
+	}
+	$url .= '&backtopage='.urlencode($backtopage);
 
 	if ($location !== '') {
 		$url .= '&location='.urlencode($location);
