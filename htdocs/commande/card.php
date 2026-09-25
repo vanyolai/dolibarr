@@ -3551,7 +3551,6 @@ if ($action == 'create' && $usercancreate) {
 					);
 				}
 
-
 				// Create contract
 				$arrayforbutaction[] = array(
 					'lang' => 'contracts',
