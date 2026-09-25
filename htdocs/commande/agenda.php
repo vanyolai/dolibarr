@@ -213,12 +213,7 @@ print dol_get_fiche_end();
 
 // Actions buttons
 
-$out = '';
-$permok = $user->hasRight('agenda', 'myactions', 'create');
-if ($permok) {
-	$out .= '&orderid=' . $object->id;
-}
-
+$agendaCreateUrl = getOrderAgendaCreateUrl($object);
 
 
 //print '</div>';
@@ -241,7 +236,7 @@ if (!empty($object->id)) {
 	// Show link to add event
 	if (isModEnabled('agenda')) {
 		$addActionBtnRight = $user->hasRight('agenda', 'myactions', 'create') || $user->hasRight('agenda', 'allactions', 'create');
-		$morehtmlright .= dolGetButtonTitle($langs->trans('AddAction'), '', 'fa fa-plus-circle', DOL_URL_ROOT . '/comm/action/card.php?action=create' . $out . '&socid=' . $object->socid . '&backtopage=' . urlencode($_SERVER["PHP_SELF"] . '?id=' . $object->id), '', (int) $addActionBtnRight);
+		$morehtmlright .= dolGetButtonTitle($langs->trans('AddAction'), '', 'fa fa-plus-circle', DOL_URL_ROOT . $agendaCreateUrl, '', (int) $addActionBtnRight);
 	}
 
 	$param = '&id=' . $object->id;
