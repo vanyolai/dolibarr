@@ -221,6 +221,115 @@ function order_admin_prepare_head()
 
 
 
+
+/**
+ * Build URL to create an Agenda event prefilled from a customer order.
+ *
+ * @param  Commande  $object  Customer order
+ * @return string             Relative URL to Agenda event creation form
+ */
+function getOrderAgendaCreateUrl(Commande $object)
+{
+	global $db;
+
+	require_once DOL_DOCUMENT_ROOT.'/core/lib/date.lib.php';
+	require_once DOL_DOCUMENT_ROOT.'/product/class/product.class.php';
+
+	if (empty($object->thirdparty) || empty($object->thirdparty->id)) {
+		$object->fetch_thirdparty();
+	}
+	if (empty($object->lines)) {
+		$object->fetch_lines();
+	}
+
+	$label = !empty($object->ref_client) ? $object->ref_client : $object->ref;
+	if (!empty($object->thirdparty->name)) {
+		$label .= ' ('.$object->thirdparty->name.')';
+	}
+
+	$locationParts = array();
+	if (!empty($object->thirdparty->address)) {
+		$locationParts[] = trim($object->thirdparty->address);
+	}
+	$zipTown = trim((!empty($object->thirdparty->zip) ? $object->thirdparty->zip.' ' : '').(!empty($object->thirdparty->town) ? $object->thirdparty->town : ''));
+	if ($zipTown !== '') {
+		$locationParts[] = $zipTown;
+	}
+	$location = implode(', ', $locationParts);
+
+	$noteParts = array();
+	if (!empty($object->thirdparty->phone)) {
+		$noteParts[] = 'Phone: '.$object->thirdparty->phone;
+	}
+	if (!empty($object->thirdparty->phone_mobile)) {
+		$noteParts[] = 'PhoneMobile: '.$object->thirdparty->phone_mobile;
+	}
+	$note = implode(' | ', $noteParts);
+
+	$plannedDate = !empty($object->delivery_date) ? $object->delivery_date : (!empty($object->date_livraison) ? $object->date_livraison : 0);
+	$eventEnd = $plannedDate;
+	$hasDuration = false;
+	$durationReliable = true;
+
+	if (!empty($plannedDate)) {
+		foreach ($object->lines as $line) {
+			if ((int) $line->product_type !== Product::TYPE_SERVICE || empty($line->fk_product) || (float) $line->qty <= 0) {
+				continue;
+			}
+
+			$product = new Product($db);
+			if ($product->fetch($line->fk_product) <= 0 || empty($product->duration_value) || empty($product->duration_unit)) {
+				continue;
+			}
+
+			$duration = (float) $product->duration_value * (float) $line->qty;
+			if ($duration <= 0) {
+				continue;
+			}
+
+			$unit = $product->duration_unit;
+			if ($unit === 'd' && floor($duration) != $duration) {
+				$wholeDays = floor($duration);
+				$fractionHours = ($duration - $wholeDays) * 24;
+				if ($wholeDays > 0) {
+					$eventEnd = dol_time_plus_duree($eventEnd, $wholeDays, 'd');
+				}
+				if ($fractionHours > 0) {
+					$eventEnd = dol_time_plus_duree($eventEnd, $fractionHours, 'h');
+				}
+			} elseif (in_array($unit, array('m', 'y')) && floor($duration) != $duration) {
+				$durationReliable = false;
+				break;
+			} else {
+				$eventEnd = dol_time_plus_duree($eventEnd, $duration, $unit);
+			}
+			$hasDuration = true;
+		}
+	}
+
+	$url = '/comm/action/card.php?action=create';
+	$url .= '&origin='.urlencode($object->element);
+	$url .= '&originid='.((int) $object->id);
+	$url .= '&socid='.((int) $object->socid);
+	$url .= '&label='.urlencode($label);
+	$url .= '&backtopage='.urlencode('/commande/card.php?id='.$object->id);
+
+	if ($location !== '') {
+		$url .= '&location='.urlencode($location);
+	}
+	if ($note !== '') {
+		$url .= '&note='.urlencode($note);
+	}
+	if (!empty($plannedDate)) {
+		$url .= '&datep='.dol_print_date($plannedDate, '%Y%m%d%H%M%S', 'tzuserrel');
+		if ($hasDuration && $durationReliable && $eventEnd > $plannedDate) {
+			$url .= '&datef='.dol_print_date($eventEnd, '%Y%m%d%H%M%S', 'tzuserrel');
+		}
+	}
+
+	return $url;
+}
+
 /**
  * Return a HTML table that contains a pie chart of sales orders
  *
