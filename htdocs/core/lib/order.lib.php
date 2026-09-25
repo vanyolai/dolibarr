@@ -311,7 +311,14 @@ function getOrderAgendaCreateUrl(Commande $object, $backtopage = '')
 				}
 
 				// Use the product itself as the source of truth for service type and duration.
-				$durationHours = $product->getProductDurationHours();
+				// Some existing installations may contain the legacy/localized "p" suffix
+				// for minutes (for example "40p"), which Product::getProductDurationHours()
+				// does not currently recognize. Normalize it here as a compatibility fallback.
+				if ($product->duration_unit === 'p') {
+					$durationHours = (float) $product->duration_value / 60;
+				} else {
+					$durationHours = $product->getProductDurationHours();
+				}
 				if ($durationHours <= 0) {
 					continue;
 				}
