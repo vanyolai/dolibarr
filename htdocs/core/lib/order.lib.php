@@ -251,7 +251,6 @@ function getOrderAgendaCreateUrl(Commande $object, $backtopage = '')
 	try {
 		require_once DOL_DOCUMENT_ROOT.'/core/lib/date.lib.php';
 		require_once DOL_DOCUMENT_ROOT.'/product/class/product.class.php';
-		require_once DOL_DOCUMENT_ROOT.'/core/class/cunits.class.php';
 		$langs->load('companies');
 
 		if (empty($object->thirdparty) || empty($object->thirdparty->id)) {
@@ -300,7 +299,6 @@ function getOrderAgendaCreateUrl(Commande $object, $backtopage = '')
 
 			$eventEnd = $plannedDate;
 			$hasDuration = false;
-			$durationUnitScaleCache = array();
 
 			foreach ($object->lines as $line) {
 				if (empty($line->fk_product) || (float) $line->qty <= 0) {
@@ -312,22 +310,8 @@ function getOrderAgendaCreateUrl(Commande $object, $backtopage = '')
 					continue;
 				}
 
-				// Product durations are stored with the short label from c_units.
-				// Resolve that short label in the time-unit dictionary so customized labels
-				// keep their configured meaning (for example a localized minute abbreviation).
-				$durationUnit = (string) $product->duration_unit;
-				if (!array_key_exists($durationUnit, $durationUnitScaleCache)) {
-					$cunit = new CUnits($db);
-					$resultUnit = $cunit->fetch(0, '', $durationUnit, 'time');
-					$durationUnitScaleCache[$durationUnit] = ($resultUnit > 0 && isset($cunit->scale)) ? (float) $cunit->scale : null;
-				}
-
-				if ($durationUnitScaleCache[$durationUnit] !== null) {
-					$durationHours = (float) $product->duration_value * $durationUnitScaleCache[$durationUnit] / 3600;
-				} else {
-					// Backward compatibility for legacy duration strings not present in c_units.
-					$durationHours = $product->getProductDurationHours();
-				}
+				// Use the Product API so duration handling follows Dolibarr's native format.
+				$durationHours = $product->getProductDurationHours();
 				if ($durationHours <= 0) {
 					continue;
 				}
