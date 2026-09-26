@@ -52,3 +52,8 @@ TableLotIncompleteRunRepairWithParamStandardEqualConfirmed=A tételtábla hiány
 IlligalQtyForSerialNumbers= Készletkorrekció szükséges az egyedi sorozatszám miatt.
 ErrorBatchesNeedStockManagement=Error. A product with batch/lot management must also be managed in stock.
 ForceBatchesNeedStockManagement=A product with batch/lot management must be managed in stock (stock management force to yes)
+
+EnterMultipleSerialNumbers=Több szériaszám megadása
+EnterOneSerialNumberPerLine=Írd be, illeszd be vagy olvasd be a szériaszámokat, soronként egyet
+NbOfSerialNumbersDetected=%s szériaszám felismerve
+ErrorDuplicateSerialNumberInList=A(z) %s szériaszám többször szerepel a listában
