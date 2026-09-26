@@ -1,0 +1,9 @@
+# Docker volumes
+*.log
+
+# macOS
+.DS_Store
+
+# Build artifacts
+*.zip
+.claude
