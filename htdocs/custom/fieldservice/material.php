@@ -61,10 +61,35 @@ $form = new Form($db);
 $formproduct = new FormProduct($db);
 $material = new FieldServiceMaterial($db);
 $allocation = new FieldServiceMaterialAllocation($db);
+$allocmaterial = null;
+$allocproduct = null;
+$scannedProductId = 0;
 
 /*
  * Actions
  */
+
+if ($action === 'scanproduct') {
+	if (!$user->hasRight('fieldservice', 'materials', 'write')) {
+		accessforbidden();
+	}
+
+	$productBarcode = trim(GETPOST('product_barcode', 'alphanohtml'));
+	if ($productBarcode === '') {
+		setEventMessages($langs->trans('ErrorFieldRequired', $langs->trans('BarCode')), null, 'errors');
+	} else {
+		$scannedProduct = new Product($db);
+		$result = $scannedProduct->fetch(0, '', '', $productBarcode, 0, 1, 1);
+		if ($result > 0 && (int) $scannedProduct->type === 0) {
+			$scannedProductId = (int) $scannedProduct->id;
+			setEventMessages($langs->trans('FieldServiceProductScanned', $scannedProduct->ref), null, 'mesgs');
+		} else {
+			setEventMessages($langs->trans('FieldServiceProductBarcodeNotFound', $productBarcode), null, 'errors');
+		}
+	}
+
+	$action = '';
+}
 
 if ($action === 'add') {
 	if (!$user->hasRight('fieldservice', 'materials', 'write')) {
@@ -110,14 +135,78 @@ if ($action === 'add') {
 		$material->description = $description;
 		$material->fk_user_create = $user->id;
 
-		$result = $material->create($user);
-		if ($result > 0) {
-			setEventMessages($langs->trans('FieldServiceMaterialAdded'), null, 'mesgs');
-			header('Location: '.$_SERVER['PHP_SELF'].'?id='.$object->id);
-			exit;
-		}
+		if ($product->hasbatch()) {
+			if (!isModEnabled('productbatch')) {
+				setEventMessages($langs->trans('FieldServiceBatchModuleRequired'), null, 'errors');
+			} else {
+				// Do not create an incomplete material row. A LOT/SN-managed product
+				// becomes persistent only together with a complete allocation.
+				$allocmaterial = $material;
+				$allocproduct = $product;
+				$action = 'prepareadd';
+			}
+		} else {
+			$result = $material->create($user);
+			if ($result > 0) {
+				setEventMessages($langs->trans('FieldServiceMaterialAdded'), null, 'mesgs');
+				header('Location: '.$_SERVER['PHP_SELF'].'?id='.$object->id);
+				exit;
+			}
 
-		setEventMessages($material->error, $material->errors, 'errors');
+			setEventMessages($material->error, $material->errors, 'errors');
+		}
+	}
+}
+
+if ($action === 'addallocated') {
+	if (!$user->hasRight('fieldservice', 'materials', 'write')) {
+		accessforbidden();
+	}
+
+	$productid = GETPOSTINT('fk_product');
+	$warehouseid = GETPOSTINT('fk_entrepot');
+	$qty = GETPOSTFLOAT('qty');
+	$description = GETPOST('description', 'restricthtml');
+	$dateuse = GETPOSTINT('date_use_ts');
+
+	$error = 0;
+	$product = new Product($db);
+	$warehouse = new Entrepot($db);
+
+	if ($productid <= 0 || $product->fetch($productid) <= 0 || (int) $product->type !== 0) {
+		setEventMessages($langs->trans('ErrorFieldRequired', $langs->trans('Product')), null, 'errors');
+		$error++;
+	}
+	if ($warehouseid <= 0 || $warehouse->fetch($warehouseid) <= 0 || empty($warehouse->statut)) {
+		setEventMessages($langs->trans('ErrorFieldRequired', $langs->trans('Warehouse')), null, 'errors');
+		$error++;
+	}
+	if ($qty <= 0) {
+		setEventMessages($langs->trans('ErrorEmptyValueForQty'), null, 'errors');
+		$error++;
+	}
+	if (empty($dateuse)) {
+		setEventMessages($langs->trans('ErrorFieldRequired', $langs->trans('Date')), null, 'errors');
+		$error++;
+	}
+	if (!$error && (!isModEnabled('productbatch') || !$product->hasbatch())) {
+		setEventMessages($langs->trans('ProductDoesNotUseBatchSerial'), null, 'errors');
+		$error++;
+	}
+
+	if (!$error) {
+		$allocmaterial = new FieldServiceMaterial($db);
+		$allocmaterial->entity = $conf->entity;
+		$allocmaterial->fk_fichinter = $object->id;
+		$allocmaterial->fk_product = $productid;
+		$allocmaterial->fk_entrepot = $warehouseid;
+		$allocmaterial->qty = $qty;
+		$allocmaterial->fk_unit = null;
+		$allocmaterial->date_use = $dateuse;
+		$allocmaterial->status = FieldServiceMaterial::STATUS_DRAFT;
+		$allocmaterial->description = $description;
+		$allocmaterial->fk_user_create = $user->id;
+		$allocproduct = $product;
 	}
 }
 
@@ -232,9 +321,6 @@ if ($action === 'delete' && $materialid > 0) {
 	exit;
 }
 
-$allocmaterial = null;
-$allocproduct = null;
-
 if (($action === 'allocate' || $action === 'saveallocation') && $materialid > 0) {
 	if (!$user->hasRight('fieldservice', 'materials', 'write')) {
 		accessforbidden();
@@ -261,7 +347,7 @@ if (($action === 'allocate' || $action === 'saveallocation') && $materialid > 0)
 	}
 }
 
-if ($action === 'saveallocation' && is_object($allocmaterial) && is_object($allocproduct)) {
+if (($action === 'saveallocation' || $action === 'addallocated') && is_object($allocmaterial) && is_object($allocproduct)) {
 	$availableBatches = $allocation->getAvailableBatches((int) $allocmaterial->fk_product, (int) $allocmaterial->fk_entrepot);
 	if (!is_array($availableBatches)) {
 		setEventMessages($allocation->error, $allocation->errors, 'errors');
@@ -361,8 +447,14 @@ if ($action === 'saveallocation' && is_object($allocmaterial) && is_object($allo
 	}
 
 	if (!$error) {
+		$isNewMaterial = ($action === 'addallocated');
+
 		$db->begin();
-		$result = $allocation->deleteDraftByMaterial($allocmaterial->id);
+		if ($isNewMaterial) {
+			$result = $allocmaterial->create($user);
+		} else {
+			$result = $allocation->deleteDraftByMaterial($allocmaterial->id);
+		}
 
 		if ($result > 0) {
 			foreach ($newAllocations as $allocationData) {
@@ -384,16 +476,20 @@ if ($action === 'saveallocation' && is_object($allocmaterial) && is_object($allo
 
 		if ($result > 0) {
 			$db->commit();
-			setEventMessages($langs->trans('FieldServiceAllocationSaved'), null, 'mesgs');
+			setEventMessages($langs->trans($isNewMaterial ? 'FieldServiceMaterialAdded' : 'FieldServiceAllocationSaved'), null, 'mesgs');
 			header('Location: '.$_SERVER['PHP_SELF'].'?id='.$object->id);
 			exit;
 		}
 
 		$db->rollback();
-		setEventMessages($allocation->error, $allocation->errors, 'errors');
+		if ($isNewMaterial) {
+			// The insert was rolled back; keep the object transient for re-rendering.
+			$allocmaterial->id = 0;
+		}
+		setEventMessages($allocmaterial->error ?: $allocation->error, array_merge($allocmaterial->errors, $allocation->errors), 'errors');
 	}
 
-	$action = 'allocate';
+	$action = ($action === 'addallocated') ? 'prepareadd' : 'allocate';
 }
 
 $editmaterial = null;
@@ -523,10 +619,13 @@ print '</table>';
 print '</div>';
 
 if (is_object($allocmaterial) && is_object($allocproduct)) {
-	$currentAllocations = $allocation->fetchAllByMaterial($allocmaterial->id);
-	if (!is_array($currentAllocations)) {
-		setEventMessages($allocation->error, $allocation->errors, 'errors');
-		$currentAllocations = array();
+	$currentAllocations = array();
+	if (!empty($allocmaterial->id)) {
+		$currentAllocations = $allocation->fetchAllByMaterial($allocmaterial->id);
+		if (!is_array($currentAllocations)) {
+			setEventMessages($allocation->error, $allocation->errors, 'errors');
+			$currentAllocations = array();
+		}
 	}
 
 	$availableBatches = $allocation->getAvailableBatches((int) $allocmaterial->fk_product, (int) $allocmaterial->fk_entrepot);
@@ -570,8 +669,17 @@ if (is_object($allocmaterial) && is_object($allocproduct)) {
 
 	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'">';
 	print '<input type="hidden" name="token" value="'.newToken().'">';
-	print '<input type="hidden" name="action" value="saveallocation">';
-	print '<input type="hidden" name="materialid" value="'.$allocmaterial->id.'">';
+	if (!empty($allocmaterial->id)) {
+		print '<input type="hidden" name="action" value="saveallocation">';
+		print '<input type="hidden" name="materialid" value="'.$allocmaterial->id.'">';
+	} else {
+		print '<input type="hidden" name="action" value="addallocated">';
+		print '<input type="hidden" name="fk_product" value="'.((int) $allocmaterial->fk_product).'">';
+		print '<input type="hidden" name="fk_entrepot" value="'.((int) $allocmaterial->fk_entrepot).'">';
+		print '<input type="hidden" name="qty" value="'.dol_escape_htmltag((string) $allocmaterial->qty, 1).'">';
+		print '<input type="hidden" name="date_use_ts" value="'.((int) $allocmaterial->date_use).'">';
+		print '<input type="hidden" name="description" value="'.dol_escape_htmltag((string) $allocmaterial->description, 1).'">';
+	}
 
 	if ((int) $allocproduct->status_batch === 2) {
 		$submittedSelection = GETPOST('serial_select', 'array');
@@ -588,7 +696,13 @@ if (is_object($allocmaterial) && is_object($allocproduct)) {
 		}
 
 		print '<br><table class="border centpercent tableforfield">';
-		print '<tr><td class="titlefield">'.$langs->trans('FieldServiceSerialList').'</td><td>';
+		$bulkValue = GETPOSTISSET('serial_bulk') ? GETPOST('serial_bulk', 'restricthtml') : '';
+		print '<tr><td class="titlefield">'.$langs->trans('FieldServiceSerialScan').'</td><td>';
+		print '<textarea name="serial_bulk" class="flat minwidth500" rows="5" autocomplete="off" autofocus placeholder="'.$langs->trans('FieldServiceSerialScanHelp').'">'.dol_escape_htmltag((string) $bulkValue).'</textarea>';
+		print '<div class="opacitymedium">'.$langs->trans('FieldServiceSerialScanHelp').'</div>';
+		print '</td></tr>';
+
+		print '<tr><td>'.$langs->trans('FieldServiceSerialList').'</td><td>';
 		print '<select name="serial_select[]" class="flat minwidth500" multiple size="'.max(4, min(12, count($availableBatches))).'">';
 		foreach ($availableBatches as $serial => $batchData) {
 			print '<option value="'.dol_escape_htmltag($serial, 1).'"'.(isset($selectedSerials[$serial]) ? ' selected' : '').'>';
@@ -598,11 +712,6 @@ if (is_object($allocmaterial) && is_object($allocproduct)) {
 		print '</select>';
 		print '</td></tr>';
 
-		$bulkValue = GETPOSTISSET('serial_bulk') ? GETPOST('serial_bulk', 'restricthtml') : '';
-		print '<tr><td>'.$langs->trans('FieldServiceSerialBulkInput').'</td><td>';
-		print '<textarea name="serial_bulk" class="flat minwidth500" rows="6" placeholder="'.$langs->trans('FieldServiceSerialBulkHelp').'">'.dol_escape_htmltag((string) $bulkValue).'</textarea>';
-		print '<div class="opacitymedium">'.$langs->trans('FieldServiceSerialBulkHelp').'</div>';
-		print '</td></tr>';
 		print '</table>';
 	} else {
 		$submittedBatch = GETPOST('lot_batch', 'array');
@@ -664,16 +773,17 @@ if (!is_object($allocmaterial) && $user->hasRight('fieldservice', 'materials', '
 		|| GETPOSTISSET('date_useyear')
 		|| GETPOSTISSET('description');
 
-	if ($hasSubmittedValues) {
-		$selectedProduct = GETPOSTINT('fk_product');
-		$selectedWarehouse = GETPOSTINT('fk_entrepot');
-		$selectedQty = GETPOST('qty', 'alphanohtml');
+	if ($hasSubmittedValues || $scannedProductId > 0) {
+		$selectedProduct = $scannedProductId > 0 ? $scannedProductId : GETPOSTINT('fk_product');
+		$selectedWarehouse = GETPOSTINT('fk_entrepot') > 0 ? GETPOSTINT('fk_entrepot') : -2;
+		$postedQty = GETPOST('qty', 'alphanohtml');
+		$selectedQty = ($scannedProductId > 0 && $postedQty === '') ? '1' : $postedQty;
 		$selectedDescription = GETPOST('description', 'restricthtml');
 
 		if (GETPOSTINT('date_useyear') > 0 && GETPOSTINT('date_usemonth') > 0 && GETPOSTINT('date_useday') > 0) {
 			$selectedDate = dol_mktime(12, 0, 0, GETPOSTINT('date_usemonth'), GETPOSTINT('date_useday'), GETPOSTINT('date_useyear'));
 		} else {
-			$selectedDate = '';
+			$selectedDate = dol_now();
 		}
 	} else {
 		$selectedProduct = $isEdit ? (int) $editmaterial->fk_product : 0;
@@ -688,12 +798,18 @@ if (!is_object($allocmaterial) && $user->hasRight('fieldservice', 'materials', '
 
 	print '<form method="POST" action="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'">';
 	print '<input type="hidden" name="token" value="'.newToken().'">';
-	print '<input type="hidden" name="action" value="'.($isEdit ? 'update' : 'add').'">';
 	if ($isEdit) {
 		print '<input type="hidden" name="materialid" value="'.$editmaterial->id.'">';
 	}
 
 	print '<table class="border centpercent tableforfield">';
+	if (!$isEdit) {
+		print '<tr><td class="titlefield">'.$langs->trans('FieldServiceProductBarcode').'</td><td>';
+		print img_picto('', 'barcode', 'class="pictofixedwidth"');
+		print '<input type="text" class="flat minwidth300" name="product_barcode" value="" autocomplete="off" autofocus placeholder="'.$langs->trans('FieldServiceScanProductBarcode').'">';
+		print ' <button type="submit" class="button" name="action" value="scanproduct">'.$langs->trans('Search').'</button>';
+		print '</td></tr>';
+	}
 	print '<tr><td class="titlefield fieldrequired">'.$langs->trans('Product').'</td><td>';
 	print img_picto('', 'product', 'class="pictofixedwidth"');
 	$form->select_produits($selectedProduct, 'fk_product', 0, 0, 0, -1, 2, '', 1, array(), 0, '1', 0, 'maxwidth500', 1, 'warehouseopen', null, 0);
@@ -718,7 +834,7 @@ if (!is_object($allocmaterial) && $user->hasRight('fieldservice', 'materials', '
 	print '</table>';
 
 	print '<div class="center">';
-	print '<input type="submit" class="button button-save" value="'.$langs->trans($isEdit ? 'Save' : 'Add').'">';
+	print '<button type="submit" class="button button-save" name="action" value="'.($isEdit ? 'update' : 'add').'">'.$langs->trans($isEdit ? 'Save' : 'Add').'</button>';
 	if ($isEdit) {
 		print ' ';
 		print '<a class="button button-cancel" href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'">'.$langs->trans('Cancel').'</a>';
