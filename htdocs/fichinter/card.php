@@ -2108,8 +2108,8 @@ if ($action == 'create') {
 					}
 				}
 
-				// Invoicing
-				if (isModEnabled('invoice') && $object->status > Fichinter::STATUS_DRAFT) {
+				// Invoicing with Dolibarr
+				if (isModEnabled('invoice') && $object->status > Fichinter::STATUS_DRAFT && $object->status != Fichinter::STATUS_CANCELED) {
 					$langs->load("bills");
 					if (!$object->billed) {
 						$arrayofcreatebutton[] = array(
@@ -2120,7 +2120,10 @@ if ($action == 'create') {
 							'enabled' => true,
 						);
 					}
+				}
 
+				// Manual billing classification must stay available even when invoicing is done outside Dolibarr.
+				if ($object->status > Fichinter::STATUS_DRAFT && $object->status != Fichinter::STATUS_CANCELED) {
 					if (!$object->billed) {
 						print '<div class="inline-block divButAction"><a class="butAction" href="'.$_SERVER["PHP_SELF"].'?id='.$object->id.'&action=classifybilled&token='.newToken().'">'.$langs->trans("InterventionClassifyBilled").'</a></div>';
 					} else {
