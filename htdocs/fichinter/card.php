@@ -709,18 +709,18 @@ if (empty($reshook)) {
 		header('Location: '.$_SERVER["PHP_SELF"].'?id='.$id);
 		exit();
 	} elseif ($action == 'classifybilled' && $permissiontoadd) {
-		// Classify Billed
-		$result = $object->setStatut(Fichinter::STATUS_BILLED);
-		if ($result > 0) {
+		// Classify billed without changing operational status
+		$result = $object->classifyBilled($user);
+		if ($result >= 0) {
 			header('Location: '.$_SERVER["PHP_SELF"].'?id='.$object->id);
 			exit;
 		} else {
 			setEventMessages($object->error, $object->errors, 'errors');
 		}
 	} elseif ($action == 'classifyunbilled' && $permissiontoadd) {
-		// Classify unbilled
-		$result = $object->setStatut(Fichinter::STATUS_VALIDATED);
-		if ($result > 0) {
+		// Classify unbilled without changing operational status
+		$result = $object->classifyUnBilled($user);
+		if ($result >= 0) {
 			header('Location: '.$_SERVER["PHP_SELF"].'?id='.$object->id);
 			exit;
 		} else {
@@ -730,6 +730,11 @@ if (empty($reshook)) {
 		// Reopen
 		$result = $object->setStatut(Fichinter::STATUS_VALIDATED);
 		if ($result > 0) {
+			if ($object->billed) {
+				$object->status = Fichinter::STATUS_VALIDATED;
+				$object->statut = Fichinter::STATUS_VALIDATED;
+				$object->classifyUnBilled($user);
+			}
 			header('Location: '.$_SERVER["PHP_SELF"].'?id='.$object->id);
 			exit;
 		} else {
@@ -1467,6 +1472,11 @@ if ($action == 'create') {
 		print '</tr>';
 	}
 
+	// Billed status is independent from operational Intervention status.
+	print '<tr><td class="titlefield">'.$langs->trans("Billed").'</td>';
+	print '<td>'.yn($object->billed).'</td>';
+	print '</tr>';
+
 	// Description (must be a textarea and not html must be allowed (used in list view)
 	print '<tr><td class="titlefield">';
 	print $form->editfieldkey("Description", 'description', $object->description, $object, $user->hasRight('ficheinter', 'creer'), 'textarea');
@@ -1946,7 +1956,7 @@ if ($action == 'create') {
 				// Invoicing
 				if (isModEnabled('invoice') && $object->status > Fichinter::STATUS_DRAFT) {
 					$langs->load("bills");
-					if ($object->status < Fichinter::STATUS_BILLED) {
+					if (!$object->billed) {
 						$arrayofcreatebutton[] = array(
 							'url' => '/compta/facture/card.php?action=create&amp;origin='.$object->element.'&amp;originid='.$object->id.'&amp;socid='.$object->socid,
 							'label' => $langs->trans('AddBill'),
@@ -1956,8 +1966,8 @@ if ($action == 'create') {
 						);
 					}
 
-					if (getDolGlobalString('FICHINTER_CLASSIFY_BILLED')) {    // Option deprecated. In a future, billed must be managed with a dedicated field to 0 or 1
-						if ($object->status != Fichinter::STATUS_BILLED) {
+					if (getDolGlobalString('FICHINTER_CLASSIFY_BILLED')) {
+						if (!$object->billed) {
 							print '<div class="inline-block divButAction"><a class="butAction" href="'.$_SERVER["PHP_SELF"].'?id='.$object->id.'&action=classifybilled&token='.newToken().'">'.$langs->trans("InterventionClassifyBilled").'</a></div>';
 						} else {
 							print '<div class="inline-block divButAction"><a class="butAction" href="'.$_SERVER["PHP_SELF"].'?id='.$object->id.'&action=classifyunbilled&token='.newToken().'">'.$langs->trans("InterventionClassifyUnBilled").'</a></div>';
@@ -1979,7 +1989,7 @@ if ($action == 'create') {
 				}
 
 				// Done
-				if (!getDolGlobalString('FICHINTER_CLASSIFY_BILLED') && $object->status > Fichinter::STATUS_DRAFT && $object->status < Fichinter::STATUS_CLOSED) {
+				if ($object->status > Fichinter::STATUS_DRAFT && $object->status < Fichinter::STATUS_CLOSED) {
 					print '<div class="inline-block divButAction"><a class="butAction" href="'.$_SERVER["PHP_SELF"].'?id='.$object->id.'&action=classifydone&token='.newToken().'">'.$langs->trans("InterventionClassifyDone").'</a></div>';
 				}
 
