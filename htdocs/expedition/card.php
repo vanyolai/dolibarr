@@ -2664,6 +2664,7 @@ if ($action == 'create' && $usercancreate) {
 		$deleteQuestion = $langs->trans("ConfirmDeleteSending", $object->ref);
 		if ($object->status == Expedition::STATUS_CLOSED && getDolGlobalString('STOCK_CALCULATE_ON_SHIPMENT_CLOSE')) {
 			$formquestion = array(
+				'text' => $deleteQuestion.'<br><br>'.img_warning().' <strong>'.$langs->trans('WarningShipmentDeleteStockMovement').'</strong>',
 				array(
 					'label' => $langs->trans('ShipmentIncrementStockOnDelete'),
 					'name' => 'alsoUpdateStock',
@@ -2671,7 +2672,7 @@ if ($action == 'create' && $usercancreate) {
 					'value' => 1
 				),
 			);
-			$deleteQuestion .= '<br><br>'.img_warning().' <strong>'.$langs->trans('WarningShipmentDeleteStockMovement').'</strong>';
+			$deleteQuestion = '';
 		}
 		$formconfirm = $form->formconfirm(
 			$_SERVER['PHP_SELF'] . '?id=' . $object->id,
@@ -2681,7 +2682,7 @@ if ($action == 'create' && $usercancreate) {
 			$formquestion,
 			0,
 			1,
-			340,
+			260,
 			760
 		);
 	}
