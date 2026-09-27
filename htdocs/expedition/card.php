@@ -2681,7 +2681,8 @@ if ($action == 'create' && $usercancreate) {
 			'confirm_delete',
 			$formquestion,
 			0,
-			1
+			1,
+			'auto'
 		);
 	}
 
