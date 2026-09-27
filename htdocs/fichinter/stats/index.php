@@ -267,9 +267,7 @@ print $form->select_dolusers($userid, 'userid', 1, null, 0, '', '', '0', 0, 0, '
 print '<tr><td class="left">'.$langs->trans("Status").'</td><td class="left">';
 $tmp = $objectstatic->LibStatut(0); // To force load of $this->labelStatus
 $liststatus = $objectstatic->labelStatus;
-if (!getDolGlobalString('FICHINTER_CLASSIFY_BILLED')) {
-	unset($liststatus[$objectstatic::STATUS_BILLED]); // Option deprecated. In a future, billed must be managed with a dedicated field to 0 or 1
-}
+unset($liststatus[$objectstatic::STATUS_BILLED]); // Legacy status; billing now has its own field.
 print $form->selectarray('object_status', $liststatus, $object_status, 1, 0, 0, '', 1);
 print '</td></tr>';
 // Year

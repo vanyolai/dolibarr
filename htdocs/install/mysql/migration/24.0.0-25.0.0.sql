@@ -50,6 +50,13 @@ ALTER TABLE llx_reception ADD COLUMN fk_warehouse integer DEFAULT NULL AFTER fk_
 
 -- v25 migration
 
+-- Intervention invoicing state is now independent from its operational status.
+ALTER TABLE llx_fichinter ADD COLUMN facture tinyint DEFAULT 0 AFTER fk_statut;
+-- STATUS_BILLED (2) used to be a terminal alternative to STATUS_CLOSED (3).
+-- Preserve both meanings when splitting the two state dimensions.
+UPDATE llx_fichinter SET facture = 1, fk_statut = 3 WHERE fk_statut = 2;
+
+
 -- Add per entity payment terms/modes and bank account (issue #39146)
 ALTER TABLE llx_societe_perentity ADD COLUMN fk_account integer DEFAULT NULL;
 ALTER TABLE llx_societe_perentity ADD COLUMN mode_reglement integer DEFAULT NULL;

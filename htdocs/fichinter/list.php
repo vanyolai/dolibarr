@@ -92,6 +92,7 @@ $search_desc = GETPOST('search_desc', 'alpha');
 $search_projet_ref = GETPOST('search_projet_ref', 'alpha');
 $search_contrat_ref = GETPOST('search_contrat_ref', 'alpha');
 $search_status = GETPOST('search_status', 'alpha');
+$search_billed = GETPOST('search_billed', 'intcomma');
 $search_signed_status = GETPOST('search_signed_status', 'alpha');
 $search_all = trim(GETPOST('search_all', 'alphanohtml'));
 $search_date_startday = GETPOSTINT('search_date_startday');
@@ -174,6 +175,7 @@ $arrayfields = array(
 	'f.tms' => array('label' => 'DateModificationShort', 'checked' => '0', 'position' => 500),
 	'f.note_public' => array('label' => 'NotePublic', 'checked' => '0', 'position' => 510, 'enabled' => (string) (!getDolGlobalInt('MAIN_LIST_HIDE_PUBLIC_NOTES'))),
 	'f.note_private' => array('label' => 'NotePrivate', 'checked' => '0', 'position' => 511, 'enabled' => (string) (!getDolGlobalInt('MAIN_LIST_HIDE_PRIVATE_NOTES'))),
+	'f.facture' => array('label' => 'Billed', 'checked' => '1', 'position' => 995),
 	'f.fk_statut' => array('label' => 'Status', 'checked' => '1', 'position' => 1000),
 	'f.signed_status' => array('label' => 'SignedStatus', 'checked' => '0', 'position' => 1001),
 	'fd.description' => array('label' => "DescriptionOfLine", 'checked' => '1', 'enabled' => getDolGlobalString('FICHINTER_DISABLE_DETAILS') != '1' ? '1' : '0'),
@@ -235,6 +237,7 @@ if (empty($reshook)) {
 		$search_contrat_ref = "";
 		$search_desc = "";
 		$search_status = "";
+		$search_billed = '';
 		$search_signed_status = '';
 		$search_date_startday = '';
 		$search_date_startmonth = '';
@@ -295,7 +298,7 @@ foreach ($arrayfields as $tmpkey => $tmpval) {
 }
 
 $sql = "SELECT";
-$sql .= " f.ref, f.ref_client, f.rowid, f.fk_statut as status, f.signed_status as signed_status, f.description, f.datec as date_creation, f.tms as date_modification, f.note_public, f.note_private,";
+$sql .= " f.ref, f.ref_client, f.rowid, f.fk_statut as status, f.facture as billed, f.signed_status as signed_status, f.description, f.datec as date_creation, f.tms as date_modification, f.note_public, f.note_private,";
 if (!getDolGlobalString('FICHINTER_DISABLE_DETAILS') && $atleastonefieldinlines) {
 	$sql .= " fd.rowid as lineid, fd.description as descriptiondetail, fd.date as dp, fd.duree,";
 }
@@ -393,6 +396,9 @@ if (!empty($searchCategoryFichinterList)) {
 }
 if ($search_status != '' && $search_status >= 0) {
 	$sql .= ' AND f.fk_statut = '.((int) ($search_status));
+}
+if ($search_billed != '' && $search_billed >= 0) {
+	$sql .= ' AND f.facture = '.((int) $search_billed);
 }
 if ($search_signed_status != '' && $search_signed_status >= 0) {
 	$sql .= ' AND f.signed_status = '.((int) $search_signed_status);
@@ -547,6 +553,9 @@ if ($search_contrat_ref) {
 }
 if ($search_status != '' && $search_status > -1) {
 	$param .= "&search_status=".urlencode($search_status);
+}
+if ($search_billed != '' && $search_billed >= 0) {
+	$param .= "&search_billed=".urlencode($search_billed);
 }
 if ($search_signed_status != '' && $search_signed_status >= 0) {
 	$param .= '&search_signed_status='.urlencode($search_signed_status);
@@ -747,14 +756,17 @@ if (!empty($arrayfields['f.note_private']['checked'])) {
 	print '<td class="liste_titre">';
 	print '</td>';
 }
+// Billed
+if (!empty($arrayfields['f.facture']['checked'])) {
+	print '<td class="liste_titre maxwidthonsmartphone center">';
+	print $form->selectyesno('search_billed', $search_billed, 1, 0, 1, 1);
+	print '</td>';
+}
 // Status
 if (!empty($arrayfields['f.fk_statut']['checked'])) {
 	print '<td class="liste_titre right parentonrightofpage">';
 	$objecttmp->getLibStatut();
-
-	if (!getDolGlobalString('FICHINTER_CLASSIFY_BILLED')) {
-		unset($objecttmp->labelStatus[Fichinter::STATUS_BILLED]); // Option deprecated. In a future, billed must be managed with a dedicated field to 0 or 1
-	}
+	unset($objecttmp->labelStatus[Fichinter::STATUS_BILLED]); // Legacy status; billing now has its own field.
 
 	// @phan-suppress-next-line PhanPluginSuspiciousParamOrder
 	print $form->selectarray('search_status', $objecttmp->labelStatus, $search_status, 1, 0, 0, '', 1, 0, 0, '', 'search_status width100 onrightofpage');
@@ -851,6 +863,10 @@ if (!empty($arrayfields['f.note_private']['checked'])) {
 	print_liste_field_titre($arrayfields['f.note_private']['label'], $_SERVER["PHP_SELF"], "f.note_private", "", $param, '', $sortfield, $sortorder, 'center nowrap ');
 	$totalarray['nbfield']++;
 }
+if (!empty($arrayfields['f.facture']['checked'])) {
+	print_liste_field_titre($arrayfields['f.facture']['label'], $_SERVER["PHP_SELF"], "f.facture", "", $param, '', $sortfield, $sortorder, 'center ');
+	$totalarray['nbfield']++;
+}
 if (!empty($arrayfields['f.fk_statut']['checked'])) {
 	print_liste_field_titre($arrayfields['f.fk_statut']['label'], $_SERVER["PHP_SELF"], "f.fk_statut", "", $param, '', $sortfield, $sortorder, 'center ');
 	$totalarray['nbfield']++;
@@ -902,6 +918,7 @@ while ($i < $imaxinloop) {
 	$objectstatic->id = $obj->rowid;
 	$objectstatic->ref = $obj->ref;
 	$objectstatic->ref_client = $obj->ref_client;
+	$objectstatic->billed = (int) $obj->billed;
 	$objectstatic->statut = $obj->status;	// deprecated
 	$objectstatic->status = $obj->status;
 	$objectstatic->signed_status = $obj->signed_status;
@@ -1084,6 +1101,17 @@ while ($i < $imaxinloop) {
 		if (!empty($arrayfields['f.note_private']['checked'])) {
 			print '<td class="sensiblehtmlcontent center">';
 			print '<div class="small lineheightsmall twolinesmax-normallineheight">'.dolPrintHTML(dolGetFirstLineOfText($obj->note_private, 5)).'</div>';
+			print '</td>';
+			if (!$i) {
+				$totalarray['nbfield']++;
+			}
+		}
+		// Billed
+		if (!empty($arrayfields['f.facture']['checked'])) {
+			print '<td class="center">';
+			if ($obj->billed) {
+				print yn($obj->billed, $langs->trans("Billed"));
+			}
 			print '</td>';
 			if (!$i) {
 				$totalarray['nbfield']++;

@@ -145,9 +145,6 @@ if ($resql) {
 	print '<table class="noborder nohover centpercent">';
 	print '<tr class="liste_titre"><th colspan="2">'.$langs->trans("Statistics").' - '.$langs->trans("Interventions").'</th></tr>'."\n";
 	$listofstatus = array(Fichinter::STATUS_DRAFT, Fichinter::STATUS_VALIDATED, Fichinter::STATUS_CLOSED);
-	if (getDolGlobalString('FICHINTER_CLASSIFY_BILLED')) {
-		$listofstatus[] = Fichinter::STATUS_BILLED;
-	}
 
 	foreach ($listofstatus as $status) {
 		$dataseries[] = array($fichinterstatic->LibStatut($status, 1), (isset($vals[$status]) ? (int) $vals[$status] : 0));

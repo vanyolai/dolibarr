@@ -79,6 +79,7 @@ class Fichinter extends CommonObject
 		'last_main_doc' => array('type' => 'varchar(255)', 'label' => 'LastMainDoc', 'enabled' => 1, 'visible' => -1, 'position' => 125),
 		'import_key' => array('type' => 'varchar(14)', 'label' => 'ImportId', 'enabled' => 1, 'visible' => -2, 'position' => 130),
 		'extraparams' => array('type' => 'varchar(255)', 'label' => 'Extraparams', 'enabled' => 1, 'visible' => -1, 'position' => 135),
+		'facture' => array('type' => 'boolean', 'label' => 'Billed', 'enabled' => 1, 'visible' => -1, 'default' => 0, 'notnull' => 1, 'position' => 490),
 		'fk_statut' => array('type' => 'integer', 'label' => 'Status', 'enabled' => 1, 'visible' => -1, 'position' => 500),
 	);
 
@@ -171,7 +172,14 @@ class Fichinter extends CommonObject
 	/**
 	 * @var int|null status
 	 */
-	public $status = 0; // 0=draft, 1=validated, 2=invoiced, 3=Terminate
+	public $status = 0; // 0=draft, 1=validated, 2=invoiced (legacy), 3=Terminate
+
+	/**
+	 * Dedicated invoicing state, independent from operational status.
+	 *
+	 * @var int<0,1>
+	 */
+	public $billed = 0;
 
 	/**
 	 * @var string description
@@ -215,7 +223,9 @@ class Fichinter extends CommonObject
 	const STATUS_VALIDATED = 1;
 
 	/**
-	 * Billed
+	 * Billed legacy status.
+	 *
+	 * @deprecated Billing is now stored in $billed / llx_fichinter.facture.
 	 */
 	const STATUS_BILLED = 2;
 
@@ -352,6 +362,7 @@ class Fichinter extends CommonObject
 		$sql .= ", fk_projet";
 		$sql .= ", fk_contrat";
 		$sql .= ", fk_statut";
+		$sql .= ", facture";
 		$sql .= ", signed_status";
 		$sql .= ", note_private";
 		$sql .= ", note_public";
@@ -369,6 +380,7 @@ class Fichinter extends CommonObject
 		$sql .= ", ".((int) $this->fk_project > 0 ? ((int) $this->fk_project) : 0);
 		$sql .= ", ".((int) $this->fk_contrat > 0 ? ((int) $this->fk_contrat) : 0);
 		$sql .= ", ".((int) $this->status);
+		$sql .= ", ".((int) $this->billed);
 		$sql .= ", ".((int) $this->signed_status);
 		$sql .= ", ".($this->note_private ? "'".$this->db->escape($this->note_private)."'" : "null");
 		$sql .= ", ".($this->note_public ? "'".$this->db->escape($this->note_public)."'" : "null");
@@ -514,7 +526,7 @@ class Fichinter extends CommonObject
 	 */
 	public function fetch($rowid, $ref = '', $ref_ext = '')
 	{
-		$sql = "SELECT f.rowid, f.ref, f.ref_client, f.description, f.fk_soc, f.fk_statut as status, f.signed_status,";
+		$sql = "SELECT f.rowid, f.ref, f.ref_client, f.description, f.fk_soc, f.fk_statut as status, f.facture as billed, f.signed_status,";
 		$sql .= " f.datec, f.dateo, f.datee, f.datet,";
 		$sql .= " f.date_valid as datev,";
 		$sql .= " f.tms as datem,";
@@ -542,6 +554,7 @@ class Fichinter extends CommonObject
 				$this->socid        = $obj->fk_soc;
 				$this->status       = $obj->status;
 				$this->statut       = $obj->status;	// deprecated
+				$this->billed       = (int) $obj->billed;
 				$this->signed_status = $obj->signed_status;
 				$this->duration     = $obj->duree;
 				$this->datec        = $this->db->jdate($obj->datec);
@@ -608,6 +621,7 @@ class Fichinter extends CommonObject
 
 		$sql = "UPDATE ".MAIN_DB_PREFIX."fichinter";
 		$sql .= " SET fk_statut = ".self::STATUS_DRAFT;
+		$sql .= ", facture = 0";
 		$sql .= " WHERE rowid = ".((int) $this->id);
 
 		$resql = $this->db->query($sql);
@@ -621,6 +635,7 @@ class Fichinter extends CommonObject
 			if (!$error) {
 				$this->status = self::STATUS_DRAFT;
 				$this->statut = self::STATUS_DRAFT; // deprecated
+				$this->billed = 0;
 				$this->db->commit();
 				return 1;
 			} else {
@@ -830,6 +845,7 @@ class Fichinter extends CommonObject
 
 		$sql = 'UPDATE '.MAIN_DB_PREFIX.'fichinter';
 		$sql .= ' SET fk_statut='.self::STATUS_VALIDATED;
+		$sql .= ', facture = 0';
 		$sql .= ", fk_user_modif = ".((int) $user->id);
 		$sql .= " WHERE rowid = ".((int) $this->id);
 
@@ -866,6 +882,90 @@ class Fichinter extends CommonObject
 			return -1 * $error;
 		}
 	}
+
+
+	/**
+	 * Classify the intervention as billed without changing its operational status.
+	 *
+	 * @param User $user Acting user
+	 * @param int<0,1> $notrigger 1=Do not execute triggers
+	 * @return int Return <0 on error, 0 if already billed, >0 on success
+	 */
+	public function classifyBilled(User $user, $notrigger = 0)
+	{
+		if ($this->billed) {
+			return 0;
+		}
+
+		$this->db->begin();
+		$sql = 'UPDATE '.MAIN_DB_PREFIX.$this->table_element.' SET facture = 1';
+		$sql .= ', fk_user_modif = '.((int) $user->id);
+		$sql .= ' WHERE rowid = '.((int) $this->id);
+		$sql .= ' AND fk_statut > '.self::STATUS_DRAFT;
+		$sql .= ' AND entity IN ('.getEntity('intervention').')';
+
+		if (!$this->db->query($sql)) {
+			$this->error = $this->db->lasterror();
+			$this->db->rollback();
+			return -1;
+		}
+
+		$this->oldcopy = dol_clone($this, 2);
+		$this->billed = 1;
+
+		if (!$notrigger) {
+			$result = $this->call_trigger('FICHINTER_CLASSIFY_BILLED', $user);
+			if ($result < 0) {
+				$this->db->rollback();
+				return -1;
+			}
+		}
+
+		$this->db->commit();
+		return 1;
+	}
+
+	/**
+	 * Classify the intervention as unbilled without changing its operational status.
+	 *
+	 * @param User $user Acting user
+	 * @param int<0,1> $notrigger 1=Do not execute triggers
+	 * @return int Return <0 on error, 0 if already unbilled, >0 on success
+	 */
+	public function classifyUnBilled(User $user, $notrigger = 0)
+	{
+		if (!$this->billed) {
+			return 0;
+		}
+
+		$this->db->begin();
+		$sql = 'UPDATE '.MAIN_DB_PREFIX.$this->table_element.' SET facture = 0';
+		$sql .= ', fk_user_modif = '.((int) $user->id);
+		$sql .= ' WHERE rowid = '.((int) $this->id);
+		$sql .= ' AND fk_statut > '.self::STATUS_DRAFT;
+		$sql .= ' AND entity IN ('.getEntity('intervention').')';
+
+		if (!$this->db->query($sql)) {
+			$this->error = $this->db->lasterror();
+			$this->db->rollback();
+			return -1;
+		}
+
+		$this->oldcopy = dol_clone($this, 2);
+		$this->billed = 0;
+
+		if (!$notrigger) {
+			$result = $this->call_trigger('FICHINTER_CLASSIFY_UNBILLED', $user);
+			if ($result < 0) {
+				$this->db->rollback();
+				return -1;
+			}
+		}
+
+		$this->db->commit();
+		return 1;
+	}
+
 
 	/**
 	 *  Close intervention
@@ -1525,6 +1625,7 @@ class Fichinter extends CommonObject
 		$this->ref = '';
 		$this->status = self::STATUS_DRAFT;
 		$this->statut = self::STATUS_DRAFT;	//  deprecated
+		$this->billed = 0;
 
 		// Clear fields
 		$this->user_author_id = $user->id;

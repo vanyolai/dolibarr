@@ -35,6 +35,7 @@ create table llx_fichinter
   fk_user_modif     integer,                    -- user making last change
   fk_user_valid		integer,                    -- user validating record
   fk_statut			smallint  DEFAULT 0,
+  facture			tinyint   DEFAULT 0,			-- billed status, independent from operational status
   dateo				date,						-- date start intervention
   datee				date,						-- date end intervention
   datet				date,						-- date end intervention
