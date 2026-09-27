@@ -1942,7 +1942,7 @@ if ($action == 'create') {
 				// Proposal
 				if (isModEnabled("service") && isModEnabled("propal") && $object->status > Fichinter::STATUS_DRAFT) {
 					$langs->load("propal");
-					if ($object->status < Fichinter::STATUS_BILLED) {
+					if (!$object->billed) {
 						$arrayofcreatebutton[] = array(
 							'url' => '/comm/propal/card.php?action=create&amp;origin='.$object->element.'&amp;originid='.$object->id.'&amp;socid='.$object->socid,
 							'label' => $langs->trans('AddProp'),
@@ -1953,7 +1953,7 @@ if ($action == 'create') {
 					}
 				}
 
-				// Invoicing
+				// Invoicing with Dolibarr
 				if (isModEnabled('invoice') && $object->status > Fichinter::STATUS_DRAFT) {
 					$langs->load("bills");
 					if (!$object->billed) {
@@ -1965,7 +1965,10 @@ if ($action == 'create') {
 							'enabled' => true,
 						);
 					}
+				}
 
+				// Manual billing classification must stay available even when invoicing is done outside Dolibarr.
+				if ($object->status > Fichinter::STATUS_DRAFT) {
 					if (!$object->billed) {
 						print '<div class="inline-block divButAction"><a class="butAction" href="'.$_SERVER["PHP_SELF"].'?id='.$object->id.'&action=classifybilled&token='.newToken().'">'.$langs->trans("InterventionClassifyBilled").'</a></div>';
 					} else {
