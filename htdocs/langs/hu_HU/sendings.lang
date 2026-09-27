@@ -69,6 +69,7 @@ OptionToSetSendingBilledNotEnabled=A Munkafolyamat modul opciója, hogy a küld�
 NoWarehouseInBase=Nincs raktár a bázison
 ShipmentUpdated=Szállítmány sikeresen frissítve
 ShipmentIncrementStockOnDelete = Készletnövelés törléskor
+WarningShipmentDeleteStockMovement=Ez a szállítmány már készletmozgást hozott létre. Törlésével a készletmozgás forrásdokumentuma megszűnik. A készlet visszaállítása javasolt; ellenkező esetben a készletcsökkenés megmarad.
 ConfirmSignShipping=Confirm Sign Shipping
 ConfirmUnsignShipping=Confirm Unsign Shipping
 SignShipping=Sign Shipping
