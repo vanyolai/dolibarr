@@ -72,6 +72,7 @@ OptionToSetSendingBilledNotEnabled=Option from module Workflow, to set sending t
 NoWarehouseInBase=No warehouse in base
 ShipmentUpdated=Shipment successfully updated
 ShipmentIncrementStockOnDelete = Increase stock on deletion
+WarningShipmentDeleteStockMovement=This shipment has already generated stock movements. Deleting it removes the source shipment from the audit trail. Restoring stock is recommended; otherwise the stock decrease will remain.
 ConfirmSignShipping=Confirm Sign Shipping
 ConfirmUnsignShipping=Confirm Unsign Shipping
 SignShipping=Sign Shipping
