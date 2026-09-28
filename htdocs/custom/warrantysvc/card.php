@@ -17,12 +17,17 @@ require_once DOL_DOCUMENT_ROOT.'/core/class/html.formcompany.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/class/html.formfile.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/class/html.formprojet.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/date.lib.php';
+require_once DOL_DOCUMENT_ROOT.'/societe/class/societe.class.php';
 require_once DOL_DOCUMENT_ROOT.'/custom/warrantysvc/class/svcrequest.class.php';
 require_once DOL_DOCUMENT_ROOT.'/custom/warrantysvc/class/svcrequestline.class.php';
 require_once DOL_DOCUMENT_ROOT.'/custom/warrantysvc/class/svcwarranty.class.php';
+require_once DOL_DOCUMENT_ROOT.'/custom/warrantysvc/class/svcsupplierrma.class.php';
 require_once DOL_DOCUMENT_ROOT.'/custom/warrantysvc/lib/warrantysvc.lib.php';
 
 $langs->loadLangs(array('warrantysvc@warrantysvc', 'companies', 'bills', 'stocks'));
+
+// Standard Dolibarr card/email hooks used by the native presend form.
+$hookmanager->initHooks(array('warrantysvccard', 'globalcard'));
 
 $id         = GETPOST('id', 'int');
 $ref        = GETPOST('ref', 'alpha');
@@ -41,6 +46,7 @@ if ($id > 0 || $ref) {
 		dol_print_error($db, $object->error);
 		exit;
 	}
+	$object->fetch_thirdparty();
 }
 
 // Permission checks
@@ -49,6 +55,8 @@ $permwrite   = $user->hasRight('warrantysvc', 'svcrequest', 'write');
 $permdelete  = $user->hasRight('warrantysvc', 'svcrequest', 'delete');
 $permvalidate= $user->hasRight('warrantysvc', 'svcrequest', 'validate');
 $permclose   = $user->hasRight('warrantysvc', 'svcrequest', 'close');
+$permsupplierrmaread = $user->hasRight('warrantysvc', 'supplierrma', 'read');
+$permsupplierrmawrite = $user->hasRight('warrantysvc', 'supplierrma', 'write');
 
 if (!$permread) { accessforbidden(); }
 
@@ -65,6 +73,12 @@ $types_no_movement     = array('guidance', 'informational');
  */
 $error = 0;
 $backurlforlist = DOL_URL_ROOT.'/custom/warrantysvc/list.php';
+
+// Standard document/email form options. card_presend.tpl.php can generate the
+// current Service Request PDF on demand and attach it to the outgoing message.
+$hidedetails = GETPOSTINT('hidedetails') ? 1 : (getDolGlobalString('MAIN_GENERATE_DOCUMENTS_HIDE_DETAILS') ? 1 : 0);
+$hidedesc = GETPOSTINT('hidedesc') ? 1 : (getDolGlobalString('MAIN_GENERATE_DOCUMENTS_HIDE_DESC') ? 1 : 0);
+$hideref = GETPOSTINT('hideref') ? 1 : (getDolGlobalString('MAIN_GENERATE_DOCUMENTS_HIDE_REF') ? 1 : 0);
 
 if (empty($backtopage) || ($cancel && empty($id))) {
 	if (empty($backtopage) || ($cancel && strpos($backtopage, '__ID__'))) {
@@ -110,6 +124,9 @@ if ($action == 'add' && $permwrite) {
 		if ($object->fk_product <= 0) {
 			$error++;
 			setEventMessages($langs->trans('ErrorFieldRequired', $langs->trans('Product')), null, 'errors');
+		} elseif (!warrantysvc_service_request_product_allowed($db, $object->fk_product)) {
+			$error++;
+			setEventMessages($langs->trans('ErrorWarrantyRequiresLotProduct'), null, 'errors');
 		}
 	} else {
 		// Warranty-backed intake. The selected Warranty row is authoritative for
@@ -127,6 +144,9 @@ if ($action == 'add' && $permwrite) {
 				} elseif ($w->status === SvcWarranty::STATUS_VOIDED) {
 					$error++;
 					setEventMessages($langs->trans('ErrorVoidedWarrantyClaim'), null, 'errors');
+				} elseif (!warrantysvc_service_request_product_allowed($db, (int) $w->fk_product)) {
+					$error++;
+					setEventMessages($langs->trans('ErrorWarrantyRequiresLotProduct'), null, 'errors');
 				} else {
 					$effective_warranty_status = $w->getStatusAt($object->issue_date);
 					$object->fk_product      = (int) $w->fk_product;
@@ -172,7 +192,9 @@ if ($action == 'update' && $permwrite) {
 	$object->reported_via        = GETPOST('reported_via', 'alpha');
 	$object->fk_pbxcall          = GETPOST('fk_pbxcall', 'int');
 	$object->issue_description   = GETPOST('issue_description', 'restricthtml');
-	$object->resolution_type     = GETPOST('resolution_type', 'alpha');
+	if (GETPOSTISSET('resolution_type')) {
+		$object->resolution_type = GETPOST('resolution_type', 'alpha');
+	}
 	$object->resolution_notes    = GETPOST('resolution_notes', 'restricthtml');
 	$object->serial_in           = GETPOST('serial_in', 'alpha');
 	$object->serial_out          = GETPOST('serial_out', 'alpha');
@@ -274,7 +296,13 @@ if ($action == 'confirm_reopen' && GETPOST('confirm', 'alpha') == 'yes' && $perm
 
 // Create return reception (warehouse chosen in inline form)
 if ($action == 'create_return_reception' && $permwrite && isModEnabled('reception')) {
-	if (in_array($object->resolution_type, $types_with_return) && empty($object->fk_reception)) {
+	$return_allowed_statuses = array(
+		SvcRequest::STATUS_VALIDATED,
+		SvcRequest::STATUS_DIAGNOSING,
+		SvcRequest::STATUS_IN_PROGRESS,
+		SvcRequest::STATUS_AWAIT_RETURN,
+	);
+	if (in_array($object->status, $return_allowed_statuses) && empty($object->fk_reception)) {
 		$rec_warehouse = GETPOST('rec_warehouse', 'int');
 		$object->serial_in = GETPOST('serial_in', 'alpha');
 		$rec_id = $object->createReturnReception($user, $rec_warehouse);
@@ -444,14 +472,43 @@ if ($action == 'remove_orphan_return_link' && $permwrite) {
 	}
 }
 
+// Native Dolibarr email sending. This intentionally uses the core mail form
+// instead of a WarrantySvc-specific sender so recipient selection, templates,
+// attachments, signatures and agenda logging behave like other Dolibarr objects.
+if ($object->id > 0 && $permwrite) {
+	$triggersendname = '';
+	$autocopy = '';
+	$trackid = 'wsvcsr'.$object->id;
+	include DOL_DOCUMENT_ROOT.'/core/actions_sendmails.inc.php';
+}
+
 /*
  * View
  */
 $form = new Form($db);
 $formcompany = new FormCompany($db);
 
-// Product list is now loaded dynamically via AJAX (ajax/sr_products.php) when the customer changes.
-// No server-side product list needed for the create form.
+// Create uses AJAX. Edit needs a deterministic server-side selector so the
+// serialized/LOT-only policy cannot be bypassed by a stale or hand-crafted UI.
+// Historical requests on a formerly allowed non-batch product keep their
+// current product in the list, but may only be changed to another eligible one.
+$filtered_product_list = null;
+if ($object->id > 0 && getDolGlobalString('WARRANTYSVC_WARRANTY_REQUIRES_LOTS')) {
+	$filtered_product_list = array();
+	$sqlProducts = "SELECT p.rowid, p.ref, p.label FROM ".MAIN_DB_PREFIX."product p";
+	$sqlProducts .= " WHERE p.entity IN (".getEntity('product').")";
+	$sqlProducts .= " AND (p.tobatch > 0 OR p.rowid = ".((int) $object->fk_product).")";
+	$sqlProducts .= " ORDER BY p.ref ASC";
+	$resProducts = $db->query($sqlProducts);
+	if ($resProducts) {
+		while ($productRow = $db->fetch_object($resProducts)) {
+			$filtered_product_list[(int) $productRow->rowid] = trim((string) $productRow->ref.' - '.(string) $productRow->label);
+		}
+		$db->free($resProducts);
+	}
+}
+
+// Product list is loaded dynamically via AJAX on create.
 
 llxHeader('', ($id ? $object->ref : $langs->trans('NewSvcRequest')), '');
 
@@ -1207,24 +1264,33 @@ if ($action == 'create') {
 	}
 	print '</td></tr>';
 
-	// Resolution type
-	print '<tr><td>'.$form->textwithpicto($langs->trans('ResolutionType'), $langs->trans('TooltipResolutionType')).'</td><td>';
-	if ($action == 'edit' && $permwrite) {
-		print Form::selectarray('resolution_type', svcrequest_resolution_types(), $object->resolution_type, 1, 0, 0, '', 0, 0, 0, '', 'flat minwidth200');
-	} elseif ($object->status == SvcRequest::STATUS_DIAGNOSING && $permwrite) {
-		print '<form action="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'" method="POST" style="display:inline">';
-		print '<input type="hidden" name="token" value="'.newToken().'">';
-		print '<input type="hidden" name="action" value="set_resolution_type">';
-		print Form::selectarray('resolution_type', svcrequest_resolution_types(), $object->resolution_type, 1, 0, 0, '', 0, 0, 0, '', 'flat minwidth200');
-		print ' <input type="submit" class="button smallpaddingimp" value="'.$langs->trans('Save').'">';
-		print '</form>';
-		if (empty($object->resolution_type)) {
-			print ' <span class="opacitymedium">'.$langs->trans('SvcChooseResolutionAfterDiagnosis').'</span>';
+	// Resolution type becomes relevant only after diagnosis has been completed.
+	if (in_array($object->status, array(
+		SvcRequest::STATUS_IN_PROGRESS,
+		SvcRequest::STATUS_AWAIT_RETURN,
+		SvcRequest::STATUS_RESOLVED,
+		SvcRequest::STATUS_CLOSED,
+	)) || (!empty($object->resolution_type) && $object->status != SvcRequest::STATUS_CANCELLED)) {
+		print '<tr><td>'.$form->textwithpicto($langs->trans('ResolutionType'), $langs->trans('TooltipResolutionType')).'</td><td>';
+		if ($action == 'edit' && $permwrite && in_array($object->status, array(SvcRequest::STATUS_IN_PROGRESS, SvcRequest::STATUS_AWAIT_RETURN))) {
+			print Form::selectarray('resolution_type', svcrequest_resolution_types(), $object->resolution_type, 1, 0, 0, '', 0, 0, 0, '', 'flat minwidth200');
+		} elseif ($object->status == SvcRequest::STATUS_IN_PROGRESS && $permwrite) {
+			print '<form action="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'" method="POST" style="display:inline">';
+			print '<input type="hidden" name="token" value="'.newToken().'">';
+			print '<input type="hidden" name="action" value="set_resolution_type">';
+			print Form::selectarray('resolution_type', svcrequest_resolution_types(), $object->resolution_type, 1, 0, 0, '', 0, 0, 0, '', 'flat minwidth200');
+			print ' <input type="submit" class="button smallpaddingimp" value="'.$langs->trans('Save').'">';
+			print '</form>';
+			if (empty($object->resolution_type)) {
+				print ' <span class="opacitymedium">'.$langs->trans('SvcChooseResolutionAfterDiagnosis').'</span>';
+			}
+		} else {
+			print !empty($object->resolution_type)
+				? svcrequest_resolution_label($object->resolution_type)
+				: '<span class="opacitymedium">&mdash;</span>';
 		}
-	} else {
-		print svcrequest_resolution_label($object->resolution_type);
+		print '</td></tr>';
 	}
-	print '</td></tr>';
 
 	// Warranty
 	print '<tr><td>'.$langs->trans('WarrantyStatus').'</td><td>';
@@ -1291,7 +1357,10 @@ if ($action == 'create') {
 	$s        = $object->status;
 
 	$has_outbound     = in_array($res_type, $types_with_outbound);
-	$has_return       = in_array($res_type, $types_with_return);
+	$use_customerreturn = getDolGlobalString('WARRANTYSVC_USE_CUSTOMERRETURN') && isModEnabled('customerreturn');
+	$has_return       = in_array($res_type, $types_with_return)
+		|| $use_customerreturn
+		|| !empty($object->fk_reception);
 	$has_intervention = in_array($res_type, $types_intervention);
 	$is_no_movement   = in_array($res_type, $types_no_movement);
 
@@ -1406,10 +1475,9 @@ if ($action == 'create') {
 
 		// --- Return Reception row ---
 		if ($has_return) {
-			$use_customerreturn = getDolGlobalString('WARRANTYSVC_USE_CUSTOMERRETURN') && isModEnabled('customerreturn');
-
 			print '<tr class="oddeven">';
-			print '<td style="padding:8px 12px; font-weight:bold; width:220px;">'.img_picto('', 'leftarrow', 'class="pictofixedwidth"').$langs->trans('ReturnReception').'</td>';
+			$return_label = $use_customerreturn ? $langs->trans('CustomerReturn') : $langs->trans('ReturnReception');
+			print '<td style="padding:8px 12px; font-weight:bold; width:220px;">'.img_picto('', 'leftarrow', 'class="pictofixedwidth"').$return_label.'</td>';
 			print '<td style="padding:8px 12px;">';
 
 			if ($use_customerreturn) {
@@ -1567,6 +1635,19 @@ if ($action == 'create') {
 			print '<a href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=edit&token='.newToken().'" class="butAction">'.$langs->trans('Modify').'</a>';
 		}
 
+		// Native Dolibarr email form: partner + partner contacts, svcrequest
+		// templates, WarrantySvc substitutions and optional PDF attachment.
+		// Preselect explicitly assigned customer-side contacts; when there is no
+		// usable assigned contact, fall back to the customer's default email.
+		if ($permwrite && $action != 'presend') {
+			$mailurl = dolBuildUrl($_SERVER['PHP_SELF'], array('id' => $object->id, 'action' => 'presend', 'mode' => 'init'), true);
+			foreach (warrantysvc_default_customer_email_receivers($object) as $receiverKey) {
+				$mailurl .= '&receiver%5B%5D='.urlencode((string) $receiverKey);
+			}
+			$mailurl .= '#formmailbeforetitle';
+			print dolGetButtonAction('', $langs->trans('SendMail'), 'email', $mailurl, '');
+		}
+
 		// DRAFT → Validate
 		if ($s == SvcRequest::STATUS_DRAFT && $permvalidate) {
 			print '<a href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=confirm_validate&token='.newToken().'" class="butAction">'.$langs->trans('ValidateSvcRequest').'</a>';
@@ -1577,14 +1658,11 @@ if ($action == 'create') {
 			print '<a href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=confirm_setdiagnosing&token='.newToken().'" class="butAction">'.$langs->trans('BeginDiagnosis').'</a>';
 		}
 
-		// DIAGNOSING → troubleshoot + Set In Progress (gated on resolution type)
+		// DIAGNOSING → troubleshoot / finish diagnosis. Physical Customer Return is
+		// available independently in the RMA panel and does not require a solution yet.
 		if ($s == SvcRequest::STATUS_DIAGNOSING && $permwrite) {
 			print '<a href="'.DOL_URL_ROOT.'/custom/warrantysvc/troubleshoot.php?id='.$object->id.'" class="butAction">'.$langs->trans('OpenTroubleshoot').'</a>';
-			if (!empty($object->resolution_type)) {
-				print '<a href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=confirm_setinprogress&token='.newToken().'" class="butAction">'.$langs->trans('SetInProgress').'</a>';
-			} else {
-				print '<span class="butActionRefused classfortooltip" title="'.dol_escape_htmltag($langs->trans('SvcRequestResolutionTypeRequiredBeforeProgress')).'">'.$langs->trans('SetInProgress').'</span>';
-			}
+			print '<a href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=confirm_setinprogress&token='.newToken().'" class="butAction">'.$langs->trans('CompleteDiagnosis').'</a>';
 		}
 
 		// IN PROGRESS — resolution-type-specific next actions
@@ -1692,6 +1770,79 @@ if ($action == 'create') {
 
 		print '</table>';
 		print '</div>';
+	}
+
+	// =====================================================================
+	// SUPPLIER SERVICE / RMA — child lifecycle objects
+	// =====================================================================
+	if ($permsupplierrmaread && $object->id > 0 && $action != 'edit') {
+		$supplierRmas = SvcSupplierRma::fetchAllForServiceRequest($db, $object->id, $object->entity);
+		print '<br>';
+		print '<a name="supplier-rma"></a>';
+		print load_fiche_titre($langs->trans('SupplierServiceRma'), '', 'tools');
+		print '<div class="div-table-responsive">';
+		print '<table class="noborder centpercent">';
+		print '<tr class="liste_titre">';
+		print '<td>'.$langs->trans('Ref').'</td>';
+		print '<td>'.$langs->trans('Supplier').'</td>';
+		print '<td>'.$langs->trans('SupplierRmaExternalRef').'</td>';
+		print '<td>'.$langs->trans('Status').'</td>';
+		print '<td>'.$langs->trans('OutboundTracking').'</td>';
+		print '<td>'.$langs->trans('ReturnTracking').'</td>';
+		print '</tr>';
+
+		if (empty($supplierRmas)) {
+			print '<tr class="oddeven"><td colspan="6"><span class="opacitymedium">'.$langs->trans('NoSupplierRma').'</span></td></tr>';
+		} else {
+			foreach ($supplierRmas as $supplierRma) {
+				$supplier = new Societe($db);
+				$supplierLabel = '—';
+				if ($supplier->fetch($supplierRma->fk_soc_supplier) > 0) {
+					$supplierLabel = $supplier->getNomUrl(1, 'supplier');
+				}
+				$outbound = dol_escape_htmltag($supplierRma->outbound_tracking ?: '—');
+				if (!empty($supplierRma->outbound_tracking) && !empty($supplierRma->outbound_tracking_url)) {
+					$outbound = '<a href="'.dol_escape_htmltag($supplierRma->outbound_tracking_url).'" target="_blank" rel="noopener">'.$outbound.'</a>';
+				}
+				$returnTracking = dol_escape_htmltag($supplierRma->return_tracking ?: '—');
+				if (!empty($supplierRma->return_tracking) && !empty($supplierRma->return_tracking_url)) {
+					$returnTracking = '<a href="'.dol_escape_htmltag($supplierRma->return_tracking_url).'" target="_blank" rel="noopener">'.$returnTracking.'</a>';
+				}
+
+				print '<tr class="oddeven">';
+				print '<td>'.$supplierRma->getNomUrl(1).'</td>';
+				print '<td>'.$supplierLabel.'</td>';
+				print '<td>'.dol_escape_htmltag($supplierRma->supplier_rma_ref ?: '—').'</td>';
+				print '<td>'.$supplierRma->getLibStatut().'</td>';
+				print '<td>'.$outbound.'</td>';
+				print '<td>'.$returnTracking.'</td>';
+				print '</tr>';
+			}
+		}
+		print '</table>';
+		print '</div>';
+
+		if ($permsupplierrmawrite) {
+			print '<div class="tabsAction">';
+			print '<a class="butAction" href="'.DOL_URL_ROOT.'/custom/warrantysvc/supplier_rma_card.php?action=create&fk_svc_request='.$object->id.'">'.$langs->trans('CreateSupplierRma').'</a>';
+			print '</div>';
+		}
+	}
+
+	// Selecting an email model reloads the same native presend form.
+	if (GETPOST('modelselected')) {
+		$action = 'presend';
+	}
+
+	if ($action == 'presend' && $permwrite) {
+		$modelmail = 'svcrequest';
+		$defaulttopic = 'SvcRequestEmailSubject';
+		$defaulttopiclang = 'warrantysvc@warrantysvc';
+		$diroutput = !empty($conf->warrantysvc->multidir_output[$object->entity])
+			? $conf->warrantysvc->multidir_output[$object->entity]
+			: (!empty($conf->warrantysvc->dir_output) ? $conf->warrantysvc->dir_output : DOL_DATA_ROOT.'/warrantysvc');
+		$trackid = 'wsvcsr'.$object->id;
+		include DOL_DOCUMENT_ROOT.'/core/tpl/card_presend.tpl.php';
 	}
 }
 

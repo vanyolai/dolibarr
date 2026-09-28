@@ -28,6 +28,20 @@ function warrantysvc_prepare_head($object)
 	$head[$h][2] = 'card';
 	$h++;
 
+	// Contacts / addresses tab. Use Dolibarr's native element_contact model so
+	// Service Request participants behave like contacts on orders/proposals.
+	$internalContacts = $object->liste_contact(-1, 'internal');
+	$externalContacts = $object->liste_contact(-1, 'external');
+	$nbContacts = (is_array($internalContacts) ? count($internalContacts) : 0)
+		+ (is_array($externalContacts) ? count($externalContacts) : 0);
+	$head[$h][0] = DOL_URL_ROOT.'/custom/warrantysvc/contact.php?id='.$object->id;
+	$head[$h][1] = $langs->trans('ContactsAddresses');
+	if ($nbContacts > 0) {
+		$head[$h][1] .= '<span class="badge marginleftonlyshort">'.$nbContacts.'</span>';
+	}
+	$head[$h][2] = 'contact';
+	$h++;
+
 	// Notes tab
 	$head[$h][0] = DOL_URL_ROOT.'/custom/warrantysvc/note.php?id='.$object->id;
 	$head[$h][1] = $langs->trans('SvcNotes');
@@ -74,6 +88,241 @@ function warrantysvc_prepare_head($object)
 	complete_head_from_modules($conf, $langs, $object, $head, $h, 'svcrequest@warrantysvc');
 
 	return $head;
+}
+
+
+/**
+ * Return default recipient keys for a customer-facing Service Request email.
+ *
+ * Priority:
+ * 1. active external contacts linked with CUSTOMER_SERVICE and belonging to
+ *    the Service Request customer, provided they have an email address;
+ * 2. legacy fk_contact when it belongs to the same customer and has email;
+ * 3. the customer's default email address ('thirdparty' key);
+ * 4. nothing.
+ *
+ * The returned values are FormMail receiver keys, so they can be passed as
+ * receiver[] parameters to Dolibarr's native presend form.
+ *
+ * @param  SvcRequest $object Service Request
+ * @return array<int,string|int> FormMail receiver keys
+ */
+function warrantysvc_default_customer_email_receivers($object)
+{
+	$receivers = array();
+	$contacts = $object->liste_contact(-1, 'external', 0, 'CUSTOMER_SERVICE', 1);
+	if (is_array($contacts)) {
+		foreach ($contacts as $contact) {
+			if ((int) $contact['socid'] === (int) $object->fk_soc && !empty($contact['email'])) {
+				$receivers[(int) $contact['id']] = (int) $contact['id'];
+			}
+		}
+	}
+	if (!empty($receivers)) {
+		return array_values($receivers);
+	}
+
+	// Backward compatibility for Service Requests created before the native
+	// Contacts/Addresses tab existed.
+	if (!empty($object->fk_contact)) {
+		require_once DOL_DOCUMENT_ROOT.'/contact/class/contact.class.php';
+		$contact = new Contact($object->db);
+		if ($contact->fetch((int) $object->fk_contact) > 0
+			&& (int) $contact->socid === (int) $object->fk_soc
+			&& !empty($contact->email)
+		) {
+			return array((int) $contact->id);
+		}
+	}
+
+	if (!is_object($object->thirdparty)) {
+		$object->fetch_thirdparty();
+	}
+	if (is_object($object->thirdparty) && !empty($object->thirdparty->email)) {
+		return array('thirdparty');
+	}
+
+	return array();
+}
+
+
+/**
+ * Return array of tabs for a Supplier RMA card.
+ *
+ * @param  SvcSupplierRma $object Supplier RMA object
+ * @return array
+ */
+function svcsupplierrma_prepare_head($object)
+{
+	global $langs, $conf;
+
+	$langs->loadLangs(array('warrantysvc@warrantysvc'));
+	$head = array();
+	$h = 0;
+
+	$head[$h][0] = DOL_URL_ROOT.'/custom/warrantysvc/supplier_rma_card.php?id='.$object->id;
+	$head[$h][1] = $langs->trans('SupplierRmaDetails');
+	$head[$h][2] = 'card';
+	$h++;
+
+	$internalContacts = $object->liste_contact(-1, 'internal');
+	$externalContacts = $object->liste_contact(-1, 'external');
+	$nbContacts = (is_array($internalContacts) ? count($internalContacts) : 0)
+		+ (is_array($externalContacts) ? count($externalContacts) : 0);
+	$head[$h][0] = DOL_URL_ROOT.'/custom/warrantysvc/supplier_rma_contact.php?id='.$object->id;
+	$head[$h][1] = $langs->trans('ContactsAddresses');
+	if ($nbContacts > 0) {
+		$head[$h][1] .= '<span class="badge marginleftonlyshort">'.$nbContacts.'</span>';
+	}
+	$head[$h][2] = 'contact';
+	$h++;
+
+	complete_head_from_modules($conf, $langs, $object, $head, $h, 'svcsupplierrma@warrantysvc');
+	return $head;
+}
+
+
+/**
+ * Return native FormMail receiver keys for a supplier-facing RMA email.
+ *
+ * Explicit Supplier Service contacts on the RMA win. If none of those have
+ * an email address, fall back to the supplier's default company email.
+ *
+ * @param  SvcSupplierRma $object Supplier RMA
+ * @return array<int,string|int>
+ */
+function warrantysvc_default_supplier_email_receivers($object)
+{
+	$receivers = array();
+	$contacts = $object->liste_contact(-1, 'external', 0, 'SUPPLIER_SERVICE', 1);
+	if (is_array($contacts)) {
+		foreach ($contacts as $contact) {
+			if ((int) $contact['socid'] === (int) $object->fk_soc_supplier && !empty($contact['email'])) {
+				$receivers[(int) $contact['id']] = (int) $contact['id'];
+			}
+		}
+	}
+	if (!empty($receivers)) {
+		return array_values($receivers);
+	}
+
+	if (!is_object($object->thirdparty)) {
+		$object->socid = (int) $object->fk_soc_supplier;
+		$object->fetch_thirdparty();
+	}
+	if (is_object($object->thirdparty) && !empty($object->thirdparty->email)) {
+		return array('thirdparty');
+	}
+
+	return array();
+}
+
+
+/**
+ * Check whether a Product is eligible for a new Service Request under the
+ * optional "serialized/LOT products only" policy.
+ *
+ * When the setting is disabled all products remain eligible. When enabled,
+ * Dolibarr's native Product::tobatch flag is authoritative.
+ *
+ * @param  DoliDB $db        Database handler
+ * @param  int    $productId Product id
+ * @return bool
+ */
+function warrantysvc_service_request_product_allowed($db, $productId)
+{
+	require_once DOL_DOCUMENT_ROOT.'/custom/warrantysvc/class/svcrequest.class.php';
+	return SvcRequest::isProductAllowedByPolicy($db, (int) $productId);
+}
+
+
+/**
+ * Return tabs for a Supplier Return card.
+ *
+ * @param SvcSupplierReturn $object Supplier Return
+ * @return array
+ */
+function svcsupplierreturn_prepare_head($object)
+{
+	global $langs, $conf;
+
+	$langs->load('warrantysvc@warrantysvc');
+	$head = array();
+	$h = 0;
+
+	$head[$h][0] = DOL_URL_ROOT.'/custom/warrantysvc/supplier_return_card.php?id='.$object->id;
+	$head[$h][1] = $langs->trans('SupplierReturnDetails');
+	$head[$h][2] = 'card';
+	$h++;
+
+	$internalContacts = $object->liste_contact(-1, 'internal');
+	$externalContacts = $object->liste_contact(-1, 'external');
+	$nbContacts = (is_array($internalContacts) ? count($internalContacts) : 0)
+		+ (is_array($externalContacts) ? count($externalContacts) : 0);
+	$head[$h][0] = DOL_URL_ROOT.'/custom/warrantysvc/supplier_return_contact.php?id='.$object->id;
+	$head[$h][1] = $langs->trans('ContactsAddresses');
+	if ($nbContacts > 0) {
+		$head[$h][1] .= '<span class="badge marginleftonlyshort">'.$nbContacts.'</span>';
+	}
+	$head[$h][2] = 'contact';
+	$h++;
+
+	$head[$h][0] = DOL_URL_ROOT.'/custom/warrantysvc/supplier_return_document.php?id='.$object->id;
+	$head[$h][1] = $langs->trans('Documents');
+	$head[$h][2] = 'document';
+	$h++;
+
+	complete_head_from_modules($conf, $langs, $object, $head, $h, 'svcsupplierreturn@warrantysvc');
+	return $head;
+}
+
+
+/**
+ * Default recipient for a supplier-return email.
+ *
+ * @param SvcSupplierReturn $object Supplier Return
+ * @return array<int,string|int>
+ */
+function warrantysvc_default_supplier_return_email_receivers($object)
+{
+	$receivers = array();
+	$contacts = $object->liste_contact(-1, 'external', 0, 'SUPPLIER_RETURN', 1);
+	if (is_array($contacts)) {
+		foreach ($contacts as $contact) {
+			if ((int) $contact['socid'] === (int) $object->fk_soc_supplier && !empty($contact['email'])) {
+				$receivers[(int) $contact['id']] = (int) $contact['id'];
+			}
+		}
+	}
+	if (!empty($receivers)) {
+		return array_values($receivers);
+	}
+
+	$object->socid = (int) $object->fk_soc_supplier;
+	if (!is_object($object->thirdparty)) {
+		$object->fetch_thirdparty();
+	}
+	if (is_object($object->thirdparty) && !empty($object->thirdparty->email)) {
+		return array('thirdparty');
+	}
+
+	return array();
+}
+
+
+/**
+ * Return Supplier Return output directory.
+ *
+ * @param SvcSupplierReturn $object Supplier Return
+ * @return string
+ */
+function warrantysvc_supplier_return_output_dir($object)
+{
+	global $conf;
+	$base = !empty($conf->warrantysvc->multidir_output[$object->entity])
+		? $conf->warrantysvc->multidir_output[$object->entity]
+		: (!empty($conf->warrantysvc->dir_output) ? $conf->warrantysvc->dir_output : DOL_DATA_ROOT.'/warrantysvc');
+	return $base.'/supplier-return/'.dol_sanitizeFileName($object->ref);
 }
 
 

@@ -4,7 +4,7 @@
 /**
  * \file    core/triggers/interface_99_modWarrantySvc_WarrantySvcTrigger.class.php
  * \ingroup warrantysvc
- * \brief   Email notification trigger for Warranty & Service module events
+ * \brief   Automation trigger for Warranty & Service module events
  *
  * Fires on SVCREQUEST_* and SVCWARRANTY_* trigger codes produced by
  * SvcRequest::call_trigger() / SvcWarranty::call_trigger().
@@ -12,7 +12,6 @@
  */
 
 require_once DOL_DOCUMENT_ROOT.'/core/triggers/dolibarrtriggers.class.php';
-require_once DOL_DOCUMENT_ROOT.'/core/class/CMailFile.class.php';
 require_once DOL_DOCUMENT_ROOT.'/custom/warrantysvc/class/svcwarrantytype.class.php';
 require_once DOL_DOCUMENT_ROOT.'/custom/warrantysvc/lib/warrantysvc.lib.php';
 
@@ -31,9 +30,9 @@ class InterfaceWarrantySvcTrigger extends DolibarrTriggers
 	{
 		$this->db = $db;
 		$this->name        = preg_replace('/^Interface/i', '', get_class($this));
-		$this->description = 'Email notifications and automation for Warranty & Service module events';
+		$this->description = 'Automation for Warranty & Service module events';
 		$this->version     = '1.0.0';
-		$this->picto       = 'email';
+		$this->picto       = 'technic';
 		$this->family      = 'warrantysvc';
 	}
 
@@ -88,39 +87,26 @@ class InterfaceWarrantySvcTrigger extends DolibarrTriggers
 				return 1;
 
 			// ------------------------------------------------------------------
-			// Service Request validated — notify assigned technician
+			// Service Request validated — keep warranty counters in sync.
+			// Email notifications are handled by Dolibarr's Notification module.
 			// ------------------------------------------------------------------
 			case 'WARRANTYSVC_VALIDATE':
-				// Sync claim_count — warranty may have been linked during validation
 				if (!empty($object->fk_warranty)) {
 					$this->_syncWarrantyClaimCount($object->fk_warranty);
 				}
-				if (!empty($object->fk_user_assigned)) {
-					$this->_notifyTechnician($object, $user, $langs, $conf, 'validate');
-				}
 				return 1;
 
 			// ------------------------------------------------------------------
-			// Service Request set in progress
+			// Lifecycle events below are intentionally notification-neutral here.
+			// Dolibarr's standard Notification trigger consumes them separately.
 			// ------------------------------------------------------------------
+			case 'WARRANTYSVC_ASSIGNED':
+			case 'WARRANTYSVC_SETDIAGNOSING':
 			case 'WARRANTYSVC_SETINPROGRESS':
-				if (!empty($object->fk_user_assigned)) {
-					$this->_notifyTechnician($object, $user, $langs, $conf, 'inprogress');
-				}
-				return 1;
-
-			// ------------------------------------------------------------------
-			// Awaiting return — notify customer to ship back
-			// ------------------------------------------------------------------
 			case 'WARRANTYSVC_AWAITRETURN':
-				$this->_notifyCustomer($object, $user, $langs, $conf, 'awaitreturn');
-				return 1;
-
-			// ------------------------------------------------------------------
-			// Resolved — notify customer
-			// ------------------------------------------------------------------
 			case 'WARRANTYSVC_RESOLVE':
-				$this->_notifyCustomer($object, $user, $langs, $conf, 'resolved');
+			case 'WARRANTYSVC_CANCEL':
+			case 'WARRANTYSVC_REOPEN':
 				return 1;
 
 			// ------------------------------------------------------------------
@@ -138,12 +124,9 @@ class InterfaceWarrantySvcTrigger extends DolibarrTriggers
 				return 1;
 
 			// ------------------------------------------------------------------
-			// Warranty created — notify customer (if configured)
+			// Warranty created. Standard Dolibarr Notification handles any email.
 			// ------------------------------------------------------------------
 			case 'SVCWARRANTY_CREATE':
-				if (getDolGlobalInt('WARRANTYSVC_NOTIFY_WARRANTY_CREATED')) {
-					$this->_notifyWarrantyCreated($object, $user, $langs, $conf);
-				}
 				return 1;
 
 			// ------------------------------------------------------------------
@@ -201,7 +184,7 @@ class InterfaceWarrantySvcTrigger extends DolibarrTriggers
 				return 0;
 
 			// ------------------------------------------------------------------
-			// Customer Return validated — if linked to an SR, auto-advance the SR
+			// Customer Return validated — if linked to an SR, record the receipt
 			// ------------------------------------------------------------------
 			case 'CUSTOMERRETURN_CUSTOMERRETURN_VALIDATE':
 				if (!getDolGlobalString('WARRANTYSVC_USE_CUSTOMERRETURN')) {
@@ -260,7 +243,9 @@ class InterfaceWarrantySvcTrigger extends DolibarrTriggers
 
 	/**
 	 * When a Customer Return is validated, check if it was linked to an SR.
-	 * If so, set date_return_received and advance the SR status.
+	 * Record the physical receipt. If an older workflow had explicitly put the
+	 * request in Await Return, resume Diagnosing: receiving the unit is an input
+	 * to diagnosis, not proof that a final resolution is already known.
 	 *
 	 * @param  object $object  The validated CustomerReturn
 	 * @param  User   $user    Actor
@@ -292,12 +277,13 @@ class InterfaceWarrantySvcTrigger extends DolibarrTriggers
 		$sr->date_return_received = dol_now();
 		$sr->update($user);
 
-		// Advance SR: awaiting return -> in progress, now that the goods are booked in.
+		// Legacy/explicit Await Return cases resume diagnosis when the unit arrives.
 		if ($sr->status == SvcRequest::STATUS_AWAIT_RETURN) {
-			if ($sr->setInProgress($user) < 0) {
-				// Do not fail the return over this — the stock movement is the
-				// important half — but never let it fail silently again.
-				dol_syslog('WarrantySvcTrigger: could not advance SR '.$sr_id.' from Await Return: '.$sr->error, LOG_WARNING);
+			$sr->status = SvcRequest::STATUS_DIAGNOSING;
+			if ($sr->update($user) < 0) {
+				// Do not fail Customer Return validation over an SR status update:
+				// the stock receipt is the authoritative physical event.
+				dol_syslog('WarrantySvcTrigger: could not resume diagnosis for SR '.$sr_id.' after CustomerReturn receipt: '.$sr->error, LOG_WARNING);
 			}
 		}
 
@@ -306,11 +292,10 @@ class InterfaceWarrantySvcTrigger extends DolibarrTriggers
 
 	/**
 	 * When a Customer Return linked to an SR is reopened, its stock movements
-	 * have been reversed — the goods are no longer booked in. Undo what
-	 * _handleCustomerReturnValidated() recorded: clear date_return_received,
-	 * and put an In Progress case back to Await Return. A case that has moved
-	 * on to Resolved/Closed is not yanked backward automatically; that is a
-	 * human decision, so it is logged for review instead.
+	 * have been reversed — the goods are no longer booked in. Clear the physical
+	 * receipt date, but do not infer a Service Request status transition from
+	 * that bookkeeping reversal. Diagnosis may have started before the return,
+	 * and Resolved/Closed cases must never be moved backward automatically.
 	 *
 	 * @param  object $object  The reopened CustomerReturn
 	 * @param  User   $user    Actor
@@ -341,11 +326,7 @@ class InterfaceWarrantySvcTrigger extends DolibarrTriggers
 		$sr->date_return_received = null;
 		$sr->update($user);
 
-		if ($sr->status == SvcRequest::STATUS_IN_PROGRESS) {
-			if ($sr->setAwaitingReturn($user) < 0) {
-				dol_syslog('WarrantySvcTrigger: could not move SR '.$sr_id.' back to Await Return after return reopen: '.$sr->error, LOG_WARNING);
-			}
-		} elseif (in_array($sr->status, array(SvcRequest::STATUS_RESOLVED, SvcRequest::STATUS_CLOSED))) {
+		if (in_array($sr->status, array(SvcRequest::STATUS_RESOLVED, SvcRequest::STATUS_CLOSED))) {
 			dol_syslog('WarrantySvcTrigger: CustomerReturn '.$cr_id.' reopened but SR '.$sr_id.' is already resolved/closed (status '.$sr->status.') — review manually', LOG_WARNING);
 		}
 
@@ -365,129 +346,6 @@ class InterfaceWarrantySvcTrigger extends DolibarrTriggers
 		$sql = "UPDATE ".MAIN_DB_PREFIX."svc_warranty SET claim_count = (SELECT COUNT(*) FROM ".MAIN_DB_PREFIX."svc_request WHERE fk_warranty = ".$fk.") WHERE rowid = ".$fk;
 		$this->db->query($sql);
 		dol_syslog('WarrantySvcTrigger: synced claim_count on warranty '.$fk, LOG_DEBUG);
-	}
-
-	// -----------------------------------------------------------------
-	// Private notification helpers
-	// -----------------------------------------------------------------
-
-	/**
-	 * Send notification email to the assigned technician
-	 *
-	 * @param  SvcRequest $object Object
-	 * @param  User       $user   Actor
-	 * @param  Translate  $langs  Lang
-	 * @param  Conf       $conf   Config
-	 * @param  string     $event  'validate'|'inprogress'
-	 * @return void
-	 */
-	private function _notifyTechnician($object, $user, $langs, $conf, $event)
-	{
-		$tech = new User($this->db);
-		if ($tech->fetch($object->fk_user_assigned) <= 0 || empty($tech->email)) {
-			return;
-		}
-
-		$from_email = $this->_getSenderEmail($conf);
-		if (empty($from_email)) {
-			return;
-		}
-
-		if ($event == 'validate') {
-			$subject = $langs->transnoentitiesnoconv('NotifTechValidateSubject', $object->ref);
-			$body    = $langs->transnoentitiesnoconv('NotifTechValidateBody', $tech->getFullName($langs), $object->ref);
-		} else {
-			$subject = $langs->transnoentitiesnoconv('NotifTechInProgressSubject', $object->ref);
-			$body    = $langs->transnoentitiesnoconv('NotifTechInProgressBody', $tech->getFullName($langs), $object->ref);
-		}
-
-		$body .= $this->_requestSummary($object, $langs);
-
-		$mail = new CMailFile($subject, $tech->email, $from_email, $body);
-		if ($mail->sendfile() <= 0) {
-			dol_syslog('WarrantySvcTrigger: failed to send tech notification: '.$mail->error, LOG_WARNING);
-		}
-	}
-
-	/**
-	 * Send notification email to the customer (thirdparty email)
-	 *
-	 * @param  SvcRequest $object Object
-	 * @param  User       $user   Actor
-	 * @param  Translate  $langs  Lang
-	 * @param  Conf       $conf   Config
-	 * @param  string     $event  'awaitreturn'|'resolved'
-	 * @return void
-	 */
-	private function _notifyCustomer($object, $user, $langs, $conf, $event)
-	{
-		$soc = new Societe($this->db);
-		if ($soc->fetch($object->fk_soc) <= 0 || empty($soc->email)) {
-			return;
-		}
-
-		$from_email = $this->_getSenderEmail($conf);
-		if (empty($from_email)) {
-			return;
-		}
-
-		if ($event == 'awaitreturn') {
-			$subject = $langs->transnoentitiesnoconv('NotifCustAwaitReturnSubject', $object->ref);
-			$body    = $langs->transnoentitiesnoconv('NotifCustAwaitReturnBody', $object->ref, $object->serial_number ?? '');
-			if (!empty($object->outbound_carrier)) {
-				$body .= "\n\n".$langs->transnoentitiesnoconv('OutboundCarrier').': '.$object->outbound_carrier;
-			}
-			if (!empty($object->outbound_tracking)) {
-				$body .= "\n".$langs->transnoentitiesnoconv('OutboundTracking').': '.$object->outbound_tracking;
-			}
-		} else {
-			$subject = $langs->transnoentitiesnoconv('NotifCustResolvedSubject', $object->ref);
-			$body    = $langs->transnoentitiesnoconv('NotifCustResolvedBody', $object->ref);
-			if (!empty($object->resolution_notes)) {
-				$body .= "\n\n".strip_tags(str_replace('<br>', "\n", $object->resolution_notes));
-			}
-		}
-
-		$mail = new CMailFile($subject, $soc->email, $from_email, $body);
-		if ($mail->sendfile() <= 0) {
-			dol_syslog('WarrantySvcTrigger: failed to send customer notification: '.$mail->error, LOG_WARNING);
-		}
-	}
-
-	/**
-	 * Notify customer that a new warranty record was created for their unit
-	 *
-	 * @param  SvcWarranty $object Warranty object
-	 * @param  User        $user   Actor
-	 * @param  Translate   $langs  Lang
-	 * @param  Conf        $conf   Config
-	 * @return void
-	 */
-	private function _notifyWarrantyCreated($object, $user, $langs, $conf)
-	{
-		$soc = new Societe($this->db);
-		if ($soc->fetch($object->fk_soc) <= 0 || empty($soc->email)) {
-			return;
-		}
-
-		$from_email = $this->_getSenderEmail($conf);
-		if (empty($from_email)) {
-			return;
-		}
-
-		$expiry_label = $object->expiry_date ? dol_print_date($object->expiry_date, 'day') : $langs->transnoentitiesnoconv('NoExpiryDate');
-
-		$subject = $langs->transnoentitiesnoconv('NotifWarrantyCreatedSubject', $object->ref);
-		$body    = $langs->transnoentitiesnoconv('NotifWarrantyCreatedBody',
-			$object->ref,
-			$object->serial_number,
-			$expiry_label
-		);
-
-		$mail = new CMailFile($subject, $soc->email, $from_email, $body);
-		if ($mail->sendfile() <= 0) {
-			dol_syslog('WarrantySvcTrigger: failed to send warranty notification: '.$mail->error, LOG_WARNING);
-		}
 	}
 
 	/**
@@ -539,39 +397,6 @@ class InterfaceWarrantySvcTrigger extends DolibarrTriggers
 		$log->condition_score    = $log->computeConditionScore();
 
 		$log->save($user);
-	}
-
-	/**
-	 * Build a short text summary of a SvcRequest for email bodies
-	 *
-	 * @param  SvcRequest $object Object
-	 * @param  Translate  $langs  Lang
-	 * @return string             Multi-line summary
-	 */
-	private function _requestSummary($object, $langs)
-	{
-		$lines   = array();
-		$lines[] = '';
-		$lines[] = $langs->transnoentitiesnoconv('Ref').': '.$object->ref;
-		$lines[] = $langs->transnoentitiesnoconv('SvcSerialNumber').': '.($object->serial_number ?? '-');
-		// Resolution type is chosen after diagnosis — only include it once set
-		if (!empty($object->resolution_type)) {
-			$resolutionLabel = svcrequest_resolution_label($object->resolution_type);
-			$lines[] = $langs->transnoentitiesnoconv('ResolutionType').': '.html_entity_decode(strip_tags($resolutionLabel), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-		}
-		return "\n".implode("\n", $lines);
-	}
-
-	/**
-	 * Return the configured sender email address
-	 *
-	 * @param  Conf $conf Dolibarr config
-	 * @return string     Email or empty string
-	 */
-	private function _getSenderEmail($conf)
-	{
-		$email = getDolGlobalString('MAIN_MAIL_FROM_EMAIL', getDolGlobalString('MAIN_INFO_SOCIETE_MAIL', ''));
-		return filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : '';
 	}
 
 	/**
