@@ -44,7 +44,7 @@ class modWarrantySvc extends DolibarrModules
 		// Module name (no spaces), used if translation string 'ModuleXXXName' not found
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
 		$this->description = 'ModuleWarrantySvcDesc';
-		$this->version = '1.36.1';
+		$this->version = '1.44.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'technic';
 
@@ -53,9 +53,9 @@ class modWarrantySvc extends DolibarrModules
 			'models' => 1,    // PDF/document models under core/modules/warrantysvc
 			'triggers' => 1,  // triggers/ directory enabled
 			'login' => 0,
-			'substitutions' => 0,
+			'substitutions' => 1,
 			'menus' => 0,
-			'hooks' => array('data' => array('elementproperties', 'productcard', 'commonobject', 'ordercard'), 'entity' => '0'),
+			'hooks' => array('data' => array('elementproperties', 'productcard', 'commonobject', 'ordercard', 'notification', 'emailtemplates', 'main'), 'entity' => '0'),
 			'apis' => 1,      // api/ directory enabled (registers via Luracast)
 		);
 
@@ -157,6 +157,56 @@ class modWarrantySvc extends DolibarrModules
 		$this->rights[$r][4] = 'svcrequest';
 		$this->rights[$r][5] = 'close';
 
+		// Supplier RMA permissions
+		$r++;
+		$this->rights[$r][0] = 510021;
+		$this->rights[$r][1] = 'PermissionReadSupplierRma';
+		$this->rights[$r][2] = 'r';
+		$this->rights[$r][3] = 0;
+		$this->rights[$r][4] = 'supplierrma';
+		$this->rights[$r][5] = 'read';
+
+		$r++;
+		$this->rights[$r][0] = 510022;
+		$this->rights[$r][1] = 'PermissionWriteSupplierRma';
+		$this->rights[$r][2] = 'w';
+		$this->rights[$r][3] = 0;
+		$this->rights[$r][4] = 'supplierrma';
+		$this->rights[$r][5] = 'write';
+
+		$r++;
+		$this->rights[$r][0] = 510023;
+		$this->rights[$r][1] = 'PermissionDeleteSupplierRma';
+		$this->rights[$r][2] = 'd';
+		$this->rights[$r][3] = 0;
+		$this->rights[$r][4] = 'supplierrma';
+		$this->rights[$r][5] = 'delete';
+
+		// Supplier Return permissions
+		$r++;
+		$this->rights[$r][0] = 510031;
+		$this->rights[$r][1] = 'PermissionReadSupplierReturn';
+		$this->rights[$r][2] = 'r';
+		$this->rights[$r][3] = 0;
+		$this->rights[$r][4] = 'supplierreturn';
+		$this->rights[$r][5] = 'read';
+
+		$r++;
+		$this->rights[$r][0] = 510032;
+		$this->rights[$r][1] = 'PermissionWriteSupplierReturn';
+		$this->rights[$r][2] = 'w';
+		$this->rights[$r][3] = 0;
+		$this->rights[$r][4] = 'supplierreturn';
+		$this->rights[$r][5] = 'write';
+
+		$r++;
+		$this->rights[$r][0] = 510033;
+		$this->rights[$r][1] = 'PermissionDeleteSupplierReturn';
+		$this->rights[$r][2] = 'd';
+		$this->rights[$r][3] = 0;
+		$this->rights[$r][4] = 'supplierreturn';
+		$this->rights[$r][5] = 'delete';
+
 		// Warranty permissions
 		$r++;
 		$this->rights[$r][0] = 510011;
@@ -200,7 +250,7 @@ class modWarrantySvc extends DolibarrModules
 			'langs'    => 'warrantysvc@warrantysvc',
 			'position' => 900,
 			'enabled'  => 'isModEnabled("warrantysvc")',
-			'perms'    => '$user->hasRight("warrantysvc", "svcrequest", "read") || $user->hasRight("warrantysvc", "svcwarranty", "read")',
+			'perms'    => '$user->hasRight("warrantysvc", "svcrequest", "read") || $user->hasRight("warrantysvc", "svcwarranty", "read") || $user->hasRight("warrantysvc", "supplierreturn", "read")',
 			'target'   => '',
 			'user'     => 0,
 		);
@@ -292,6 +342,41 @@ class modWarrantySvc extends DolibarrModules
 			'user'     => 0,
 		);
 		$r++;
+
+		// Supplier Returns
+		$this->menu[$r] = array(
+			'fk_menu'  => 'fk_mainmenu=products,fk_leftmenu=warrantysvc',
+			'type'     => 'left',
+			'titre'    => 'SupplierReturns',
+			'prefix'   => img_picto('', 'shipment', 'class="paddingright pictofixedwidth"'),
+			'mainmenu' => 'products',
+			'leftmenu' => 'warrantysvc_supplier_return_list',
+			'url'      => '/warrantysvc/supplier_return_list.php?mainmenu=products&leftmenu=warrantysvc_supplier_return_list',
+			'langs'    => 'warrantysvc@warrantysvc',
+			'position' => 960,
+			'enabled'  => 'isModEnabled("warrantysvc")',
+			'perms'    => '$user->hasRight("warrantysvc", "supplierreturn", "read")',
+			'target'   => '',
+			'user'     => 0,
+		);
+		$r++;
+
+		$this->menu[$r] = array(
+			'fk_menu'  => 'fk_mainmenu=products,fk_leftmenu=warrantysvc_supplier_return_list',
+			'type'     => 'left',
+			'titre'    => 'NewSupplierReturn',
+			'prefix'   => img_picto('', 'add', 'class="paddingright pictofixedwidth"'),
+			'mainmenu' => 'products',
+			'leftmenu' => 'warrantysvc_supplier_return_new',
+			'url'      => '/warrantysvc/supplier_return_card.php?action=create&mainmenu=products&leftmenu=warrantysvc_supplier_return_new',
+			'langs'    => 'warrantysvc@warrantysvc',
+			'position' => 970,
+			'enabled'  => 'isModEnabled("warrantysvc")',
+			'perms'    => '$user->hasRight("warrantysvc", "supplierreturn", "write")',
+			'target'   => '',
+			'user'     => 0,
+		);
+		$r++;
 	}
 
 	/**
@@ -307,6 +392,7 @@ class modWarrantySvc extends DolibarrModules
 	{
 		$warrantyTable = MAIN_DB_PREFIX.'svc_warranty';
 		$typeTable = MAIN_DB_PREFIX.'svc_warranty_type';
+		$supplierRmaTable = MAIN_DB_PREFIX.'svc_supplier_rma';
 
 		$warrantyDesc = $this->db->DDLDescTable($warrantyTable);
 		if ($warrantyDesc && $this->db->num_rows($warrantyDesc) > 0) {
@@ -366,8 +452,127 @@ class modWarrantySvc extends DolibarrModules
 			}
 		}
 
+		// 1.44: Supplier RMA gained quantity so LOT based RMAs can represent
+		// more than one unit while serial-numbered RMAs still use qty=1.
+		$rmaDesc = $this->db->DDLDescTable($supplierRmaTable);
+		if ($rmaDesc && $this->db->num_rows($rmaDesc) > 0) {
+			$resQty = $this->db->DDLDescTable($supplierRmaTable, 'qty');
+			$qtyExists = $resQty && $this->db->fetch_object($resQty);
+			if (!$qtyExists && $this->db->DDLAddField($supplierRmaTable, 'qty', array('type'=>'decimal', 'value'=>'24,8', 'default'=>'1')) < 0) {
+				return -1;
+			}
+		}
+
 		return 1;
 	}
+
+	/**
+	 * Register native Dolibarr contact roles for Service Requests.
+	 *
+	 * Rows are updated in place so existing llx_element_contact relations keep
+	 * their fk_c_type_contact values across module upgrades/re-enables.
+	 *
+	 * @return int 1 if OK, -1 on error
+	 */
+	private function syncContactTypeCatalog()
+	{
+		$types = array(
+			array('svcrequest', 'internal', 'SERVICE_MANAGER', 'Service Request handler', 10),
+			array('svcrequest', 'external', 'CUSTOMER_SERVICE', 'Customer service contact', 20),
+			array('svcsupplierrma', 'internal', 'SERVICE_MANAGER', 'Supplier RMA handler', 10),
+			array('svcsupplierrma', 'external', 'SUPPLIER_SERVICE', 'Supplier service contact', 20),
+			array('svcsupplierreturn', 'internal', 'SERVICE_MANAGER', 'Supplier Return handler', 10),
+			array('svcsupplierreturn', 'external', 'SUPPLIER_RETURN', 'Supplier return contact', 20),
+		);
+
+		foreach ($types as $type) {
+			list($element, $source, $code, $label, $position) = $type;
+			$sql = "SELECT rowid FROM ".MAIN_DB_PREFIX."c_type_contact";
+			$sql .= " WHERE element = '".$this->db->escape($element)."'";
+			$sql .= " AND source = '".$this->db->escape($source)."'";
+			$sql .= " AND code = '".$this->db->escape($code)."'";
+			$resql = $this->db->query($sql);
+			if (!$resql) {
+				return -1;
+			}
+			$obj = $this->db->fetch_object($resql);
+			$this->db->free($resql);
+
+			if ($obj) {
+				$sql = "UPDATE ".MAIN_DB_PREFIX."c_type_contact SET";
+				$sql .= " libelle = '".$this->db->escape($label)."'";
+				$sql .= ", active = 1";
+				$sql .= ", module = 'warrantysvc'";
+				$sql .= ", position = ".((int) $position);
+				$sql .= " WHERE rowid = ".((int) $obj->rowid);
+			} else {
+				$sql = "INSERT INTO ".MAIN_DB_PREFIX."c_type_contact";
+				$sql .= " (element, source, code, libelle, active, module, position) VALUES (";
+				$sql .= "'".$this->db->escape($element)."',";
+				$sql .= "'".$this->db->escape($source)."',";
+				$sql .= "'".$this->db->escape($code)."',";
+				$sql .= "'".$this->db->escape($label)."',1,'warrantysvc',".((int) $position).")";
+			}
+
+			if (!$this->db->query($sql)) {
+				return -1;
+			}
+		}
+
+		return 1;
+	}
+
+	/**
+	 * Register WarrantySvc trigger codes in Dolibarr's central action catalog.
+	 *
+	 * Existing rows are updated in place instead of deleted/reinserted so
+	 * llx_notify_def subscriptions keep their fk_action references.
+	 *
+	 * @return int 1 if OK, -1 on error
+	 */
+	private function syncNotificationEventCatalog()
+	{
+		$events = array(
+			array('WARRANTYSVC_ASSIGNED', 'Service Request assigned', 'Executed when a WarrantySvc Service Request is assigned to a user', 'svcrequest', 511),
+			array('SVCWARRANTY_CREATE', 'Warranty created', 'Executed when a WarrantySvc warranty record is created', 'svcwarranty', 521),
+		);
+
+		foreach ($events as $event) {
+			list($code, $label, $description, $elementtype, $rang) = $event;
+			$sql = "SELECT rowid FROM ".MAIN_DB_PREFIX."c_action_trigger";
+			$sql .= " WHERE code = '".$this->db->escape($code)."'";
+			$resql = $this->db->query($sql);
+			if (!$resql) {
+				return -1;
+			}
+			$obj = $this->db->fetch_object($resql);
+			$this->db->free($resql);
+
+			if ($obj) {
+				$sql = "UPDATE ".MAIN_DB_PREFIX."c_action_trigger SET";
+				$sql .= " label = '".$this->db->escape($label)."'";
+				$sql .= ", description = '".$this->db->escape($description)."'";
+				$sql .= ", elementtype = '".$this->db->escape($elementtype)."'";
+				$sql .= ", rang = ".((int) $rang);
+				$sql .= " WHERE rowid = ".((int) $obj->rowid);
+			} else {
+				$sql = "INSERT INTO ".MAIN_DB_PREFIX."c_action_trigger";
+				$sql .= " (code, label, description, elementtype, rang) VALUES (";
+				$sql .= "'".$this->db->escape($code)."',";
+				$sql .= "'".$this->db->escape($label)."',";
+				$sql .= "'".$this->db->escape($description)."',";
+				$sql .= "'".$this->db->escape($elementtype)."',";
+				$sql .= ((int) $rang).")";
+			}
+
+			if (!$this->db->query($sql)) {
+				return -1;
+			}
+		}
+
+		return 1;
+	}
+
 
 	/**
 	 * Function called when module is enabled.
@@ -384,6 +589,12 @@ class modWarrantySvc extends DolibarrModules
 
 		$result = $this->_load_tables('/warrantysvc/sql/');
 		if ($result < 0) {
+			return -1;
+		}
+		if ($this->syncContactTypeCatalog() < 0) {
+			return -1;
+		}
+		if ($this->syncNotificationEventCatalog() < 0) {
 			return -1;
 		}
 		return $this->_init(array(), $options);

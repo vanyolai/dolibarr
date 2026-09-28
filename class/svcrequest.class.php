@@ -189,11 +189,118 @@ class SvcRequest extends CommonObject
 	 * @param  int  $notrigger 0=launch triggers, 1=disable
 	 * @return int             >0 if OK, <0 if KO
 	 */
+	/**
+	 * Check whether a product is eligible for Service Requests under the
+	 * optional serialized/LOT-only policy.
+	 *
+	 * @param  DoliDB $db        Database handler
+	 * @param  int    $productId Product ID
+	 * @return bool
+	 */
+	public static function isProductAllowedByPolicy($db, $productId)
+	{
+		$productId = (int) $productId;
+		if ($productId <= 0) {
+			return false;
+		}
+		if (!getDolGlobalString('WARRANTYSVC_WARRANTY_REQUIRES_LOTS')) {
+			return true;
+		}
+
+		$sql = "SELECT p.tobatch FROM ".MAIN_DB_PREFIX."product p";
+		$sql .= " WHERE p.rowid = ".$productId;
+		$sql .= " AND p.entity IN (".getEntity('product').")";
+		$resql = $db->query($sql);
+		if (!$resql) {
+			return false;
+		}
+		$obj = $db->fetch_object($resql);
+		$db->free($resql);
+		return $obj && (int) $obj->tobatch > 0;
+	}
+
+	/**
+	 * Validate invariants shared by every Service Request creation/update path.
+	 *
+	 * @return int 1 if valid, -1 otherwise
+	 */
+	public function validateBusinessRules()
+	{
+		global $conf;
+
+		if ((int) $this->fk_soc <= 0) {
+			$this->error = 'ErrorThirdPartyRequired';
+			return -1;
+		}
+		if ((int) $this->fk_product <= 0) {
+			$this->error = 'ErrorProductRequired';
+			return -1;
+		}
+		if (!self::isProductAllowedByPolicy($this->db, (int) $this->fk_product)) {
+			// Existing historical requests created before this policy was enforced
+			// remain editable as long as their product is not being changed.
+			$legacySameProduct = false;
+			if (!empty($this->id)) {
+				$sqlCurrent = "SELECT fk_product FROM ".MAIN_DB_PREFIX."svc_request";
+				$sqlCurrent .= " WHERE rowid = ".((int) $this->id);
+				$sqlCurrent .= " AND entity = ".((int) $conf->entity);
+				$resCurrent = $this->db->query($sqlCurrent);
+				if ($resCurrent && ($objCurrent = $this->db->fetch_object($resCurrent))) {
+					$legacySameProduct = ((int) $objCurrent->fk_product === (int) $this->fk_product);
+				}
+				if ($resCurrent) {
+					$this->db->free($resCurrent);
+				}
+			}
+			if (!$legacySameProduct) {
+				$this->error = 'ErrorWarrantyRequiresLotProduct';
+				return -1;
+			}
+		}
+
+		if (!empty($this->fk_warranty)) {
+			require_once DOL_DOCUMENT_ROOT.'/custom/warrantysvc/class/svcwarranty.class.php';
+			$warranty = new SvcWarranty($this->db);
+			if ($warranty->fetch((int) $this->fk_warranty) <= 0) {
+				$this->error = 'ErrorWarrantyNotFound';
+				return -1;
+			}
+			if ((int) $warranty->entity !== (int) $conf->entity
+				|| (int) $warranty->fk_soc !== (int) $this->fk_soc
+				|| (int) $warranty->fk_product !== (int) $this->fk_product
+			) {
+				$this->error = 'ErrorWarrantyDoesNotMatchClaim';
+				return -1;
+			}
+			if ($warranty->status === SvcWarranty::STATUS_VOIDED) {
+				$this->error = 'ErrorVoidedWarrantyClaim';
+				return -1;
+			}
+			if ((string) $this->serial_number !== ''
+				&& (string) $warranty->serial_number !== ''
+				&& (string) $warranty->serial_number !== (string) $this->serial_number
+			) {
+				$this->error = 'ErrorWarrantyDoesNotMatchClaim';
+				return -1;
+			}
+		}
+
+		return 1;
+	}
+
 	public function create($user, $notrigger = 0)
 	{
 		global $conf;
 
 		$error = 0;
+
+		if (!empty($this->socid) && empty($this->fk_soc)) {
+			$this->fk_soc = $this->socid;
+		}
+		$this->socid = (int) $this->fk_soc;
+		if ($this->validateBusinessRules() < 0) {
+			return -1;
+		}
 
 		$this->db->begin();
 
@@ -210,11 +317,6 @@ class SvcRequest extends CommonObject
 		}
 		if (empty($this->issue_date)) {
 			$this->issue_date = $now;
-		}
-
-		// fk_soc alias
-		if (!empty($this->socid) && empty($this->fk_soc)) {
-			$this->fk_soc = $this->socid;
 		}
 
 		$sql = "INSERT INTO ".MAIN_DB_PREFIX."svc_request (";
@@ -283,6 +385,12 @@ class SvcRequest extends CommonObject
 				$result = $this->call_trigger('WARRANTYSVC_CREATE', $user);
 				if ($result < 0) {
 					$error++;
+				}
+				if (!$error && !empty($this->fk_user_assigned)) {
+					$result = $this->call_trigger('WARRANTYSVC_ASSIGNED', $user);
+					if ($result < 0) {
+						$error++;
+					}
 				}
 			}
 		}
@@ -443,12 +551,28 @@ class SvcRequest extends CommonObject
 	public function update($user, $notrigger = 0)
 	{
 		$error = 0;
-
-		$this->db->begin();
+		$previousAssignedUser = 0;
 
 		if (!empty($this->socid) && empty($this->fk_soc)) {
 			$this->fk_soc = $this->socid;
 		}
+		$this->socid = (int) $this->fk_soc;
+		if ($this->validateBusinessRules() < 0) {
+			return -1;
+		}
+
+		if (!$notrigger && !empty($this->id)) {
+			$sqlAssigned = "SELECT fk_user_assigned FROM ".MAIN_DB_PREFIX."svc_request WHERE rowid = ".((int) $this->id);
+			$resAssigned = $this->db->query($sqlAssigned);
+			if ($resAssigned && ($objAssigned = $this->db->fetch_object($resAssigned))) {
+				$previousAssignedUser = (int) $objAssigned->fk_user_assigned;
+			}
+			if ($resAssigned) {
+				$this->db->free($resAssigned);
+			}
+		}
+
+		$this->db->begin();
 
 		$sql = "UPDATE ".MAIN_DB_PREFIX."svc_request SET";
 		$sql .= " fk_soc = ".((int) $this->fk_soc);
@@ -512,6 +636,12 @@ class SvcRequest extends CommonObject
 			if ($result < 0) {
 				$error++;
 			}
+			if (!$error && !empty($this->fk_user_assigned) && (int) $this->fk_user_assigned !== $previousAssignedUser) {
+				$result = $this->call_trigger('WARRANTYSVC_ASSIGNED', $user);
+				if ($result < 0) {
+					$error++;
+				}
+			}
 		}
 
 		if ($error) {
@@ -534,6 +664,23 @@ class SvcRequest extends CommonObject
 	{
 		$error = 0;
 
+		// Supplier RMAs are auditable child business objects. Never orphan them
+		// or silently cascade them when the parent Service Request is deleted.
+		$sql = "SELECT COUNT(*) AS nb FROM ".MAIN_DB_PREFIX."svc_supplier_rma";
+		$sql .= " WHERE fk_svc_request = ".((int) $this->id);
+		$sql .= " AND entity = ".((int) $this->entity);
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->error = $this->db->lasterror();
+			return -1;
+		}
+		$obj = $this->db->fetch_object($resql);
+		$this->db->free($resql);
+		if ($obj && (int) $obj->nb > 0) {
+			$this->error = 'ErrorSvcRequestHasSupplierRma';
+			return -1;
+		}
+
 		$this->db->begin();
 
 		if (!$notrigger) {
@@ -546,6 +693,34 @@ class SvcRequest extends CommonObject
 		if (!$error) {
 			// Delete lines first
 			$sql = "DELETE FROM ".MAIN_DB_PREFIX."svc_request_line WHERE fk_svc_request = ".((int) $this->id);
+			if (!$this->db->query($sql)) {
+				$error++;
+				$this->errors[] = $this->db->lasterror();
+			}
+		}
+
+		if (!$error) {
+			$sql = "DELETE FROM ".MAIN_DB_PREFIX."svc_troubleshoot WHERE fk_svcrequest = ".((int) $this->id);
+			if (!$this->db->query($sql)) {
+				$error++;
+				$this->errors[] = $this->db->lasterror();
+			}
+		}
+
+		if (!$error) {
+			$sql = "DELETE FROM ".MAIN_DB_PREFIX."element_contact";
+			$sql .= " WHERE element_id = ".((int) $this->id);
+			$sql .= " AND fk_c_type_contact IN (SELECT rowid FROM ".MAIN_DB_PREFIX."c_type_contact WHERE element = 'svcrequest')";
+			if (!$this->db->query($sql)) {
+				$error++;
+				$this->errors[] = $this->db->lasterror();
+			}
+		}
+
+		if (!$error) {
+			$sql = "DELETE FROM ".MAIN_DB_PREFIX."element_element";
+			$sql .= " WHERE (fk_source = ".((int) $this->id)." AND sourcetype IN ('svcrequest','warrantysvc_svcrequest'))";
+			$sql .= " OR (fk_target = ".((int) $this->id)." AND targettype IN ('svcrequest','warrantysvc_svcrequest'))";
 			if (!$this->db->query($sql)) {
 				$error++;
 				$this->errors[] = $this->db->lasterror();
@@ -624,34 +799,36 @@ class SvcRequest extends CommonObject
 		}
 
 		$this->status = self::STATUS_DIAGNOSING;
-		return $this->update($user);
+		$result = $this->update($user);
+		if ($result > 0) {
+			$result = $this->call_trigger('WARRANTYSVC_SETDIAGNOSING', $user);
+		}
+		return $result;
 	}
 
 	/**
-	 * Set RMA to In Progress. Allowed from DIAGNOSING (normal forward path)
-	 * or AWAIT_RETURN (return-received auto-advance). A resolution type must
-	 * have been chosen before fulfillment can begin.
+	 * Set RMA to In Progress after diagnosis.
+	 *
+	 * The final resolution/work path is intentionally not required here:
+	 * a physical return can be part of diagnosis, and the actual resolution
+	 * may only become known after the returned unit has been inspected.
 	 *
 	 * @param  User $user User performing action
 	 * @return int        >0 if OK, <0 if KO
 	 */
 	public function setInProgress($user)
 	{
-		// AWAIT_RETURN is a valid entry point: the CustomerReturn trigger advances
-		// the case here once the returned goods are booked in. VALIDATED is not --
-		// the forward path goes through setDiagnosing() first.
 		if (!in_array($this->status, array(self::STATUS_DIAGNOSING, self::STATUS_AWAIT_RETURN))) {
 			$this->error = 'SvcRequestNotInDiagnosingStatus';
 			return -1;
 		}
 
-		if (empty($this->resolution_type)) {
-			$this->error = 'SvcRequestResolutionTypeRequiredBeforeProgress';
-			return -1;
-		}
-
 		$this->status = self::STATUS_IN_PROGRESS;
-		return $this->update($user);
+		$result = $this->update($user);
+		if ($result > 0) {
+			$result = $this->call_trigger('WARRANTYSVC_SETINPROGRESS', $user);
+		}
+		return $result;
 	}
 
 	/**
@@ -663,7 +840,11 @@ class SvcRequest extends CommonObject
 	public function setAwaitingReturn($user)
 	{
 		$this->status = self::STATUS_AWAIT_RETURN;
-		return $this->update($user);
+		$result = $this->update($user);
+		if ($result > 0) {
+			$result = $this->call_trigger('WARRANTYSVC_AWAITRETURN', $user);
+		}
+		return $result;
 	}
 
 	/**
@@ -675,7 +856,11 @@ class SvcRequest extends CommonObject
 	public function resolve($user)
 	{
 		$this->status = self::STATUS_RESOLVED;
-		return $this->update($user);
+		$result = $this->update($user);
+		if ($result > 0) {
+			$result = $this->call_trigger('WARRANTYSVC_RESOLVE', $user);
+		}
+		return $result;
 	}
 
 	/**
@@ -718,7 +903,11 @@ class SvcRequest extends CommonObject
 		}
 
 		$this->status = self::STATUS_CANCELLED;
-		return $this->update($user);
+		$result = $this->update($user);
+		if ($result > 0) {
+			$result = $this->call_trigger('WARRANTYSVC_CANCEL', $user);
+		}
+		return $result;
 	}
 
 	/**
@@ -732,7 +921,11 @@ class SvcRequest extends CommonObject
 		$this->status      = self::STATUS_IN_PROGRESS;
 		$this->date_closed = null;
 		$this->fk_user_close = null;
-		return $this->update($user);
+		$result = $this->update($user);
+		if ($result > 0) {
+			$result = $this->call_trigger('WARRANTYSVC_REOPEN', $user);
+		}
+		return $result;
 	}
 
 	/**
@@ -933,7 +1126,8 @@ class SvcRequest extends CommonObject
 
 		// Insert reception lines (no PO line — fk_commandefourndet NULL)
 		foreach ($lines_to_receive as $line) {
-			$sql = "INSERT INTO ".MAIN_DB_PREFIX."receptiondet_batch (fk_reception, fk_product, qty, fk_entrepot, fk_commandefourndet, comment, status) VALUES (".$rec_id.", ".$line['fk_product'].", ".$line['qty'].", ".((int) $fk_warehouse).", NULL, '".$this->db->escape('RMA '.$this->ref)."', 0)";
+			$sql = "INSERT INTO ".MAIN_DB_PREFIX."receptiondet_batch (fk_reception, fk_element, fk_elementdet, element_type, fk_product, qty, fk_entrepot, comment, status)";
+			$sql .= " VALUES (".$rec_id.", ".((int) $this->id).", NULL, 'warrantysvc_svcrequest', ".$line['fk_product'].", ".$line['qty'].", ".((int) $fk_warehouse).", '".$this->db->escape('RMA '.$this->ref)."', 0)";
 			if (!$this->db->query($sql)) {
 				$this->db->rollback();
 				$this->error = $this->db->lasterror();
@@ -1568,6 +1762,7 @@ class SvcRequest extends CommonObject
 		$statusLabels = array(
 			self::STATUS_DRAFT        => array('label' => 'SvcDraft',        'picto' => 'status0'),
 			self::STATUS_VALIDATED    => array('label' => 'SvcValidated',    'picto' => 'status1'),
+			self::STATUS_DIAGNOSING   => array('label' => 'SvcDiagnosing',   'picto' => 'status2'),
 			self::STATUS_IN_PROGRESS  => array('label' => 'SvcInProgress',   'picto' => 'status3'),
 			self::STATUS_AWAIT_RETURN => array('label' => 'AwaitingReturn','picto' => 'status4'),
 			self::STATUS_RESOLVED     => array('label' => 'SvcResolved',     'picto' => 'status6'),
@@ -1649,6 +1844,186 @@ class SvcRequest extends CommonObject
 	}
 
 	/**
+	 * Factory: create a SvcRequest pre-populated from a core Intervention.
+	 *
+	 * The Intervention remains the work-sheet source of truth. This method only
+	 * imports stable intake context (customer, project, date, description) and
+	 * links the new draft Service Request back to it. Product/serial/warranty
+	 * identity is supplied explicitly by the caller so WarrantySvc does not need
+	 * to know anything about the module that initiated the hand-off.
+	 *
+	 * Supported options:
+	 * - fk_product, serial_number, fk_warranty
+	 * - fk_contact, customer_site, fk_project
+	 * - issue_description, issue_date, fk_user_assigned
+	 * - reported_via, note_private, note_public
+	 *
+	 * @param  int   $fichinter_id Intervention ID
+	 * @param  User  $user         User creating the request
+	 * @param  array $options      Intake overrides / asset identity
+	 * @return int                 >0 = new SvcRequest ID, <0 = error
+	 */
+	public function createFromIntervention($fichinter_id, $user, $options = array())
+	{
+		global $conf;
+
+		if (empty($fichinter_id)) {
+			$this->error = 'MissingInterventionId';
+			return -1;
+		}
+		if (!isModEnabled('ficheinter')) {
+			$this->error = 'ModuleInterventionNotEnabled';
+			return -1;
+		}
+
+		require_once DOL_DOCUMENT_ROOT.'/fichinter/class/fichinter.class.php';
+		require_once DOL_DOCUMENT_ROOT.'/custom/warrantysvc/class/svcwarranty.class.php';
+
+		$intervention = new Fichinter($this->db);
+		$result = $intervention->fetch((int) $fichinter_id);
+		if ($result <= 0) {
+			$this->error = $result < 0 ? $intervention->error : 'InterventionNotFound';
+			$this->errors = $intervention->errors;
+			return -1;
+		}
+		if (!empty($intervention->entity) && (int) $intervention->entity !== (int) $conf->entity) {
+			$this->error = 'InterventionEntityMismatch';
+			return -1;
+		}
+
+		$interventionSocId = !empty($intervention->socid)
+			? (int) $intervention->socid
+			: (!empty($intervention->fk_soc) ? (int) $intervention->fk_soc : 0);
+		if ($interventionSocId <= 0) {
+			$this->error = 'InterventionThirdPartyRequired';
+			return -1;
+		}
+
+		$this->fk_soc = $interventionSocId;
+		$this->fk_intervention = (int) $fichinter_id;
+		$this->fk_project = !empty($intervention->fk_project)
+			? (int) $intervention->fk_project
+			: (!empty($intervention->fk_projet) ? (int) $intervention->fk_projet : 0);
+		$this->issue_description = !empty($intervention->description)
+			? trim(strip_tags($intervention->description))
+			: '';
+		$this->issue_date = !empty($intervention->datei)
+			? $intervention->datei
+			: (!empty($intervention->datec) ? $intervention->datec : dol_now());
+		$this->reported_via = 'intervention';
+
+		$allowed = array(
+			'fk_product',
+			'serial_number',
+			'fk_warranty',
+			'fk_contact',
+			'customer_site',
+			'fk_project',
+			'issue_description',
+			'issue_date',
+			'fk_user_assigned',
+			'reported_via',
+			'note_private',
+			'note_public',
+		);
+		foreach ($allowed as $field) {
+			if (array_key_exists($field, $options)) {
+				$this->$field = $options[$field];
+			}
+		}
+
+		$this->fk_product = (int) $this->fk_product;
+		$this->fk_warranty = (int) $this->fk_warranty;
+		$this->fk_contact = (int) $this->fk_contact;
+		$this->fk_project = (int) $this->fk_project;
+		$this->fk_user_assigned = (int) $this->fk_user_assigned;
+		$this->serial_number = trim((string) $this->serial_number);
+
+		$warranty = null;
+		if ($this->fk_warranty > 0) {
+			$warranty = new SvcWarranty($this->db);
+			if ($warranty->fetch($this->fk_warranty) <= 0) {
+				$this->error = 'ErrorWarrantyNotFound';
+				return -1;
+			}
+			if ((int) $warranty->entity !== (int) $conf->entity || (int) $warranty->fk_soc !== (int) $this->fk_soc) {
+				$this->error = 'ErrorWarrantyDoesNotMatchClaim';
+				return -1;
+			}
+			if ($this->fk_product > 0 && (int) $warranty->fk_product !== (int) $this->fk_product) {
+				$this->error = 'ErrorWarrantyDoesNotMatchClaim';
+				return -1;
+			}
+			if ($this->serial_number !== '' && (string) $warranty->serial_number !== '' && (string) $warranty->serial_number !== $this->serial_number) {
+				$this->error = 'ErrorWarrantyDoesNotMatchClaim';
+				return -1;
+			}
+			if ($warranty->status === SvcWarranty::STATUS_VOIDED) {
+				$this->error = 'ErrorVoidedWarrantyClaim';
+				return -1;
+			}
+		} elseif ($this->fk_product > 0 && $this->serial_number !== '' && getDolGlobalInt('WARRANTYSVC_AUTO_WARRANTY_CHECK')) {
+			$sql = "SELECT rowid FROM ".MAIN_DB_PREFIX."svc_warranty";
+			$sql .= " WHERE entity = ".((int) $conf->entity);
+			$sql .= " AND fk_soc = ".((int) $this->fk_soc);
+			$sql .= " AND fk_product = ".((int) $this->fk_product);
+			$sql .= " AND serial_number = '".$this->db->escape($this->serial_number)."'";
+			$sql .= " ORDER BY rowid DESC LIMIT 1";
+			$resql = $this->db->query($sql);
+			if (!$resql) {
+				$this->error = $this->db->lasterror();
+				return -1;
+			}
+			$obj = $this->db->fetch_object($resql);
+			$this->db->free($resql);
+			if ($obj) {
+				$warranty = new SvcWarranty($this->db);
+				if ($warranty->fetch((int) $obj->rowid) <= 0) {
+					$this->error = $warranty->error;
+					$this->errors = $warranty->errors;
+					return -1;
+				}
+				if ($warranty->status === SvcWarranty::STATUS_VOIDED) {
+					$warranty = null;
+				} else {
+					$this->fk_warranty = (int) $warranty->id;
+				}
+			}
+		}
+
+		if (is_object($warranty)) {
+			$this->fk_product = (int) $warranty->fk_product;
+			$this->serial_number = (string) $warranty->serial_number;
+			$this->fk_warranty = (int) $warranty->id;
+			$this->warranty_status = $warranty->getStatusAt($this->issue_date);
+			$this->billable = ($this->warranty_status === SvcWarranty::STATUS_ACTIVE) ? 0 : 1;
+		} else {
+			if ($this->fk_product <= 0) {
+				$this->error = 'ErrorFieldRequired';
+				$this->errors = array('Product');
+				return -1;
+			}
+			$this->fk_warranty = null;
+			$this->warranty_status = 'none';
+			$this->billable = 1;
+		}
+
+		// Intake never decides a solution path. The normal diagnosis-first
+		// lifecycle starts from this draft request.
+		$this->resolution_type = null;
+		$this->status = self::STATUS_DRAFT;
+
+		$result = $this->create($user);
+		if ($result <= 0) {
+			return $result;
+		}
+
+		$this->syncLinkedObjects();
+		return $result;
+	}
+
+
+	/**
 	 * Factory: create a SvcRequest pre-populated from a CRM phone call (actioncomm)
 	 *
 	 * Reads the actioncomm record to pull: fk_soc, fk_contact, description,
@@ -1693,7 +2068,6 @@ class SvcRequest extends CommonObject
 		$this->issue_date      = $this->db->jdate($call->datep);
 		$this->reported_via    = 'phone';
 		$this->fk_pbxcall      = $actioncomm_id;
-		$this->resolution_type = 'guidance'; // default — agent will update
 
 		if (empty($this->fk_user_assigned) && !empty($call->fk_user_action)) {
 			$this->fk_user_assigned = $call->fk_user_action;

@@ -155,6 +155,7 @@ ValidateSvcRequest = Validate
 BeginDiagnosis = Begin Diagnosis
 OpenTroubleshoot = Open Troubleshoot
 SetInProgress = Set In Progress
+CompleteDiagnosis = Complete Diagnosis
 SendReplacement = Send Replacement
 ReceiveReturn = Receive Return
 CreateIntervention = Create Intervention
@@ -285,18 +286,6 @@ ChecklistFirmware = Verify firmware / software version
 ChecklistFirmwareDesc = Check if unit is on current firmware. Note version.
 
 #
-# Email notifications — trigger-based
-#
-NotifTechValidateSubject = [New Assignment] Warranty Claim %s assigned to you
-NotifTechValidateBody = Hello %s,\n\nWarranty claim %s has been validated and assigned to you.
-NotifTechInProgressSubject = [In Progress] Warranty Claim %s
-NotifTechInProgressBody = Hello %s,\n\nWarranty claim %s has been moved to In Progress status.
-NotifCustAwaitReturnSubject = [Action Required] Please return unit — Warranty Claim %s
-NotifCustAwaitReturnBody = Dear customer,\n\nA replacement unit has been shipped for warranty claim %s (serial: %s).\n\nPlease arrange the return of the original unit.
-NotifCustResolvedSubject = [Resolved] Warranty Claim %s
-NotifCustResolvedBody = Dear customer,\n\nYour warranty claim %s has been resolved.
-NotifWarrantyCreatedSubject = Warranty Registration — %s
-NotifWarrantyCreatedBody = Dear customer,\n\nYour warranty %s for serial number %s has been registered.\n\nCoverage expires: %s
 NoExpiryDate = No expiry date
 
 #
@@ -355,13 +344,12 @@ ErrorInvalidProductWarrantyMonthsField = The selected Product warranty duration 
 DefaultCoverageDays = Default warranty coverage (days)
 DefaultCoverageDaysDesc = Legacy fallback coverage period used only when no Product warranty-month field is configured.
 SvcDays = days
-NotifyWarrantyCreated = Email customer on warranty creation
-NotifyWarrantyCreatedDesc = Send an email notification to the customer when a new warranty record is created for their unit.
 WarrantyRequiresLots = Restrict warranty claims to serialized products
 WarrantyRequiresLotsDesc = When enabled, the product selector on warranty claim forms will only show products that have serial number or lot tracking enabled in the Stocks module.
 UseCustomerReturns = Use Customer Returns module for inbound returns
 UseCustomerReturnsDesc = When enabled, the "Create Return" button on warranty claims will open the Customer Returns module instead of creating a native Reception. This provides stock movement tracking, credit note generation, and a dedicated return document.
 CustomerReturnModuleNotInstalled = The Customer Returns module is not installed or enabled. Install it from the Modules page to use this feature.
+CustomerReturn = Customer Return
 CreateCustomerReturn = Create Customer Return
 NumberingModule = Reference Numbering Module
 
@@ -442,7 +430,7 @@ TooltipCoverageTerms = Describe what this warranty covers — parts, labour, on-
 TooltipExclusions = Explicitly list what is not covered — physical damage, accessories, misuse, etc. Printed on warranty documents.
 OriginOrder = Origin Order
 TooltipOriginOrder = Dolibarr order ID this warranty originated from. Optional — used for purchase traceability.
-TooltipNotePublic = Notes visible to the customer. Included in warranty registration emails if notifications are enabled.
+TooltipNotePublic = Notes visible to the customer.
 TooltipWTypeCode = Short machine-readable identifier, e.g. "standard" or "extended_2yr". Used internally — no spaces allowed.
 TooltipWTypeLabel = Human-readable name shown in warranty type dropdowns and on warranty records.
 TooltipWTypeDescription = Optional description of what this warranty type covers. Visible to staff when choosing a type.
@@ -613,3 +601,235 @@ BackToWarrantySelection = Back to warranty selection
 ManualClaimEntryWarning = Warranty-less service intake: no WarrantySvc warranty will be linked and the case starts as billable.
 ErrorLoadingWarrantyUnits = Could not load the customer's warranty records.
 ErrorWarrantyRequiredForClaim = Select a warranty record or switch to warranty-less service intake.
+
+#
+# Intervention intake
+#
+MissingInterventionId = Intervention ID is missing.
+InterventionNotFound = Intervention not found.
+InterventionEntityMismatch = The Intervention belongs to another entity.
+InterventionThirdPartyRequired = The Intervention must have a third party before a Service Request can be created.
+ModuleInterventionNotEnabled = The Intervention module is not enabled.
+
+#
+# Standard Dolibarr notifications / email templates
+#
+WarrantySvcNotifications=Notifications
+WarrantySvcNotificationsDesc=WarrantySvc email notifications are handled by Dolibarr's standard Notifications module. Recipients and per-event email templates are configured there.
+WarrantySvcConfigureNotifications=Configure Dolibarr notifications
+WarrantySvcNotificationModuleDisabled=The Dolibarr Notifications module is not enabled.
+MailToSvcRequest=Warranty Service Request
+SvcRequestEmailSubject=Warranty Service Request - %s
+TypeContact_svcrequest_internal_SERVICE_MANAGER=Service Request handler
+TypeContact_svcrequest_external_CUSTOMER_SERVICE=Customer service contact
+MailToSvcWarranty=Warranty
+Notify_WARRANTYSVC_CREATE=Warranty Service Request created
+Notify_WARRANTYSVC_ASSIGNED=Warranty Service Request assigned
+Notify_WARRANTYSVC_VALIDATE=Warranty Service Request validated
+Notify_WARRANTYSVC_SETDIAGNOSING=Warranty Service Request diagnosis started
+Notify_WARRANTYSVC_SETINPROGRESS=Warranty Service Request in progress
+Notify_WARRANTYSVC_AWAITRETURN=Warranty Service Request awaiting return
+Notify_WARRANTYSVC_RESOLVE=Warranty Service Request resolved
+Notify_WARRANTYSVC_CLOSE=Warranty Service Request closed
+Notify_WARRANTYSVC_CANCEL=Warranty Service Request cancelled
+Notify_WARRANTYSVC_REOPEN=Warranty Service Request reopened
+Notify_WARRANTYSVC_DELETE=Warranty Service Request deleted
+Notify_SVCWARRANTY_CREATE=Warranty created
+
+#
+# WarrantySvc substitution variables
+#
+SubstProductRef=Product reference
+SubstProductLabel=Product label
+SubstSerialNumber=Serial number
+SubstWarrantyStatus=Warranty status
+SubstWarrantyStartDate=Warranty start date
+SubstWarrantyExpiryDate=Warranty expiry date
+SubstIssueDate=Issue date
+SubstIssueDescription=Issue description
+SubstServiceRequestStatus=Current Service Request status
+
+#
+# Supplier service RMA
+#
+SupplierRma=Supplier RMA
+NewSupplierRma=New Supplier RMA
+SupplierServiceRma=Supplier service / RMA
+SupplierRmaDetails=Supplier RMA details
+CreateSupplierRma=Create Supplier RMA
+NoSupplierRma=No supplier RMA has been created for this Service Request.
+BackToSvcRequest=Back to Service Request
+SupplierRmaExternalRef=Supplier RMA / ticket ref.
+SupplierRmaProblemDescription=Problem description sent to supplier
+SupplierRmaDiagnosis=Diagnosis / troubleshooting
+SupplierRmaAccessoriesSent=Accessories sent
+TrackingUrl=Tracking URL
+OpenTracking=Open tracking
+SupplierRmaResult=Supplier result
+SupplierRmaResultNone=Not recorded
+SupplierRmaResultRepaired=Repaired
+SupplierRmaResultReplaced=Replaced
+SupplierRmaResultRejected=Rejected
+SupplierRmaResultCredit=Credit issued
+SupplierRmaResultNoFaultFound=No fault found
+SupplierRmaResultOther=Other
+SupplierRmaDateRequest=Request date
+SupplierRmaDateAuthorized=Authorized date
+SupplierRmaDateSupplierReceived=Supplier received
+SupplierRmaDateSupplierCompleted=Supplier completed
+SupplierRmaDateReturned=Returned to us
+SupplierRmaStockMovementOut=Outbound stock movement
+SupplierRmaStockMovementIn=Inbound stock movement
+SupplierRmaLifecycle=Supplier RMA lifecycle
+NoLifecycleEvents=No lifecycle events recorded.
+SupplierRmaEventCREATE=Created
+SupplierRmaEventSTATUS=Status change
+SupplierRmaCreated=Supplier RMA %s created.
+SupplierRmaUpdated=Supplier RMA updated.
+SupplierRmaStatusUpdated=Supplier RMA status updated.
+SupplierRmaDeleted=Supplier RMA deleted.
+DeleteSupplierRma=Delete Supplier RMA
+ConfirmDeleteSupplierRma=Do you really want to permanently delete Supplier RMA %s?
+SupplierRmaAuthorize=Authorize RMA
+SupplierRmaMarkShipped=Mark shipped to supplier
+SupplierRmaMarkSupplierReceived=Mark received by supplier
+SupplierRmaMarkInService=Mark in service
+SupplierRmaMarkRepaired=Mark repaired
+SupplierRmaMarkReplaced=Mark replaced
+SupplierRmaMarkRejected=Mark rejected
+SupplierRmaMarkReturned=Mark returned to us
+SupplierRmaClose=Close Supplier RMA
+SupplierRmaStatusDraft=Draft
+SupplierRmaStatusAuthorized=Authorized
+SupplierRmaStatusShipped=Shipped to supplier
+SupplierRmaStatusReceivedBySupplier=Received by supplier
+SupplierRmaStatusInService=In service
+SupplierRmaStatusRepaired=Repaired
+SupplierRmaStatusReplaced=Replaced
+SupplierRmaStatusRejected=Rejected
+SupplierRmaStatusReturned=Returned
+SupplierRmaStatusClosed=Closed
+SupplierRmaStatusCancelled=Cancelled
+ErrorSupplierRequired=Supplier is required.
+ErrorSupplierRmaInvalidSupplier=The selected third party is not an active supplier.
+ErrorSupplierRmaServiceRequestRequired=Service Request is required.
+ErrorSupplierRmaServiceRequestNotFound=The parent Service Request was not found.
+ErrorProductRequired=Product is required.
+ErrorSupplierRmaProblemRequired=Problem description is required.
+ErrorSupplierRmaDeleteStatus=Only draft or cancelled Supplier RMAs can be deleted.
+ErrorSupplierRmaInvalidTransition=This Supplier RMA status transition is not allowed.
+ErrorSupplierRmaConcurrentUpdate=The Supplier RMA was modified by another operation. Reload the page and try again.
+PermissionReadSupplierRma=Read supplier RMAs
+PermissionWriteSupplierRma=Create and edit supplier RMAs
+PermissionDeleteSupplierRma=Delete supplier RMAs
+TypeContact_svcsupplierrma_internal_SERVICE_MANAGER=Supplier RMA handler
+TypeContact_svcsupplierrma_external_SUPPLIER_SERVICE=Supplier service contact
+MailToSupplierRma=Supplier RMA
+SupplierRmaEmailSubject=Supplier RMA - %s
+SubstServiceRequestRef=Service Request reference
+SubstCustomerName=Customer name
+SubstSupplierRmaRef=Internal Supplier RMA reference
+SubstSupplierRmaExternalRef=Supplier RMA / ticket reference
+SubstSupplierRmaStatus=Supplier RMA status
+SubstSupplierName=Supplier name
+SubstSupplierRmaProblemDescription=Problem description sent to supplier
+SubstSupplierRmaDiagnosis=Diagnosis / troubleshooting
+SubstSupplierRmaAccessories=Accessories sent
+SubstOutboundCarrier=Outbound carrier
+SubstOutboundTracking=Outbound tracking number
+SubstOutboundTrackingUrl=Outbound tracking URL
+SubstReturnCarrier=Return carrier
+SubstReturnTracking=Return tracking number
+SubstReturnTrackingUrl=Return tracking URL
+SubstReplacementSerialNumber=Replacement serial number
+
+SupplierRmaRollback=Go back one status
+ConfirmSupplierRmaRollback=Go back one workflow status? This is a correction and will be recorded in the Supplier RMA lifecycle.
+SupplierRmaRollbackAuditNote=Workflow status corrected one step backwards.
+SupplierRmaRolledBack=Supplier RMA moved back one status.
+SupplierRmaEventROLLBACK=Status correction
+ErrorSupplierRmaNoPreviousStatus=There is no previous Supplier RMA status to restore.
+ErrorSupplierRmaRollbackOutboundStock=Cannot move back before Shipped because an outbound stock movement already exists.
+ErrorSupplierRmaRollbackInboundStock=Cannot move back before Returned because an inbound stock movement already exists.
+ErrorSupplierRmaDeleteStockMovements=This Supplier RMA has linked stock movements and cannot be permanently deleted.
+ErrorWarrantyRequiresLotProduct=This Service Request is not allowed because the module is configured to accept only products with serial/LOT tracking enabled.
+
+#
+# Supplier returns
+#
+SupplierReturn=Supplier Return
+SupplierReturns=Supplier Returns
+NewSupplierReturn=New Supplier Return
+SupplierReturnDetails=Supplier Return details
+SupplierReturnLines=Returned items
+SupplierReturnExternalRef=Supplier return authorization / reference
+SupplierReturnReason=Return reason
+SupplierReturnLifecycle=Supplier Return lifecycle
+SupplierReturnDocument=Supplier Return Note
+SupplierReturnPdfStandardDesc=Standard supplier return note with product, quantity and LOT/serial details
+SupplierReturnCreated=Supplier Return %s created.
+SupplierReturnUpdated=Supplier Return updated.
+SupplierReturnDeleted=Supplier Return deleted.
+SupplierReturnStockMovedOut=Returned goods were removed from warehouse stock.
+SupplierReturnAuthorize=Authorize return
+SupplierReturnShip=Ship to supplier
+SupplierReturnClose=Close return
+SupplierReturnRollback=Go back one status
+SupplierReturnRollbackAuditNote=Supplier Return workflow status corrected one step backwards.
+DeleteSupplierReturn=Delete Supplier Return
+ConfirmDeleteSupplierReturn=Do you really want to permanently delete Supplier Return %s?
+ConfirmSupplierReturnAuthorize=Authorize this Supplier Return? Items are not removed from stock yet.
+ConfirmSupplierReturnShip=Mark this Supplier Return as shipped? This will immediately remove all listed items from the selected warehouse and cannot be rolled back automatically.
+ConfirmSupplierReturnClose=Close this Supplier Return?
+ConfirmSupplierReturnCancel=Invalidate this Supplier Return? It can be reopened while no stock movement exists.
+ConfirmSupplierReturnReopen=Reopen this Supplier Return as draft?
+ConfirmSupplierReturnRollback=Go back one workflow status? A shipped return cannot be rolled back because stock has already left the warehouse.
+SupplierReturnStatusDraft=Draft
+SupplierReturnStatusAuthorized=Authorized
+SupplierReturnStatusShipped=Shipped to supplier
+SupplierReturnStatusClosed=Closed
+SupplierReturnStatusCancelled=Invalidated
+SupplierReturnEventCREATE=Created
+SupplierReturnEventSTATUS=Status change
+SupplierReturnEventROLLBACK=Status correction
+NoSupplierReturnLines=No items have been added to this Supplier Return.
+SupplierReturnDateAuthorized=Authorized date
+SupplierReturnExternalReference=Supplier return reference
+PermissionReadSupplierReturn=Read supplier returns
+PermissionWriteSupplierReturn=Create and edit supplier returns
+PermissionDeleteSupplierReturn=Delete supplier returns
+TypeContact_svcsupplierreturn_internal_SERVICE_MANAGER=Supplier Return handler
+TypeContact_svcsupplierreturn_external_SUPPLIER_RETURN=Supplier return contact
+MailToSupplierReturn=Supplier Return
+SupplierReturnEmailSubject=Supplier Return - __REF__
+ErrorSupplierReturnRequired=Supplier Return is required.
+ErrorSupplierReturnQtyRequired=Quantity must be greater than zero.
+ErrorSupplierReturnLineAlreadyMoved=This line already has a stock movement and can no longer be edited or deleted.
+ErrorSupplierReturnInvalidSupplier=The selected third party is not an active supplier.
+ErrorSupplierReturnOrderMismatch=The selected supplier order does not belong to this supplier.
+ErrorSupplierReturnReceptionMismatch=The selected reception does not belong to this supplier.
+ErrorSupplierReturnReasonRequired=A return reason is required.
+ErrorSupplierReturnNotEditable=This Supplier Return is no longer editable.
+ErrorSupplierReturnInvalidTransition=This Supplier Return status transition is not allowed.
+ErrorSupplierReturnNeedsLines=Add at least one item before authorizing the Supplier Return.
+ErrorSupplierReturnWarehouseRequired=Select the source warehouse before authorizing the Supplier Return.
+ErrorSupplierReturnConcurrentUpdate=The Supplier Return was modified by another operation. Reload and try again.
+ErrorSupplierReturnStockLocked=This Supplier Return already has stock movements. Finish or retry shipment; it can no longer be edited, cancelled, reopened or rolled back before Shipped.
+ErrorSupplierReturnRollbackStockMovement=The shipped status cannot be rolled back because stock movements have already been created.
+ErrorSupplierReturnNoPreviousStatus=There is no previous Supplier Return status to restore.
+ErrorSupplierReturnDeleteStockMovements=This Supplier Return has stock movements and cannot be permanently deleted.
+ErrorSvcRequestHasSupplierRma=This Service Request has one or more Supplier RMAs. Delete or retain those child records before permanently deleting the Service Request.
+ErrorSupplierRmaQtyRequired=Supplier RMA quantity must be greater than zero.
+ErrorSupplierRmaIdentityLocked=Supplier, product, quantity and serial/LOT cannot be changed after the Supplier RMA has been shipped.
+ErrorWarrantySvcInvalidStockMovement=Invalid stock movement request.
+ErrorWarrantySvcProductNotStockable=The selected product is not stock managed.
+ErrorWarrantySvcBatchRequired=A LOT or serial number is required for this product.
+ErrorWarrantySvcSerialQtyMustBeOne=A serial-numbered stock movement must have quantity 1.
+ErrorWarrantySvcInsufficientStock=There is not enough stock in the selected warehouse for this product and LOT/serial.
+ErrorWarrantySvcStockMovementFailed=The stock movement could not be created.
+ErrorWarrantySvcStockMovementConflict=An existing WarrantySvc stock movement does not match the requested product, warehouse, quantity or LOT/serial.
+SubstSupplierReturnRef=Supplier Return reference
+SubstSupplierReturnExternalRef=Supplier return authorization/reference
+SubstSupplierReturnStatus=Supplier Return status
+SubstSupplierReturnReason=Supplier Return reason
+SubstSupplierReturnLines=Returned item list

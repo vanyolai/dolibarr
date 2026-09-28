@@ -81,6 +81,26 @@ class ActionsWarrantySvc
 				'classfile'     => 'svcrequest',
 				'classname'     => 'SvcRequest',
 			);
+		} elseif ($elementType === 'svcsupplierrma' || $elementType === 'warrantysvc_svcsupplierrma') {
+			$this->results = array(
+				'module'        => 'warrantysvc',
+				'element'       => 'svcsupplierrma',
+				'table_element' => 'svc_supplier_rma',
+				'subelement'    => 'svcsupplierrma',
+				'classpath'     => 'custom/warrantysvc/class',
+				'classfile'     => 'svcsupplierrma',
+				'classname'     => 'SvcSupplierRma',
+			);
+		} elseif ($elementType === 'svcsupplierreturn' || $elementType === 'warrantysvc_svcsupplierreturn') {
+			$this->results = array(
+				'module'        => 'warrantysvc',
+				'element'       => 'svcsupplierreturn',
+				'table_element' => 'svc_supplier_return',
+				'subelement'    => 'svcsupplierreturn',
+				'classpath'     => 'custom/warrantysvc/class',
+				'classfile'     => 'svcsupplierreturn',
+				'classname'     => 'SvcSupplierReturn',
+			);
 		}
 
 		return 0;
@@ -387,4 +407,150 @@ class ActionsWarrantySvc
 
 		return 0; // Let the normal product save continue uninterrupted
 	}
+
+	/**
+	 * Register WarrantySvc business events with Dolibarr's standard
+	 * Notification module.
+	 *
+	 * @param  array       $parameters  Hook parameters
+	 * @param  object      $object      Current object
+	 * @param  string      $action      Current action
+	 * @param  HookManager $hookmanager Hook manager
+	 * @return int                      0 = merge hook results
+	 */
+	public function notifsupported($parameters, &$object, &$action, $hookmanager)
+	{
+		global $conf, $langs;
+
+		if (!isModEnabled('warrantysvc')) {
+			return 0;
+		}
+
+		$langs->load('warrantysvc@warrantysvc');
+		$this->prepareNotificationObjectConfig($conf);
+
+		$this->results = array(
+			'arrayofnotifsupported' => array(
+				'WARRANTYSVC_ASSIGNED',
+				'SVCWARRANTY_CREATE',
+			),
+		);
+
+		return 0;
+	}
+
+	/**
+	 * Remove the generic amount-threshold editor from WarrantySvc fixed-email
+	 * notification rows. Dolibarr 23 renders a net-amount threshold for almost
+	 * every fixed notification event, but Service Requests and Warranties do
+	 * not have an amount semantic. The backend remains the core Notification
+	 * module; this hook only removes an irrelevant UI field and therefore lets
+	 * Dolibarr persist the standard threshold value as zero.
+	 *
+	 * @param  array       $parameters  Hook parameters
+	 * @param  object|null $object      Current object
+	 * @param  string      $action      Current action
+	 * @param  HookManager $hookmanager Hook manager
+	 * @return int                      0 = continue
+	 */
+	public function addHtmlHeader($parameters, &$object, &$action, $hookmanager)
+	{
+		$script = isset($_SERVER['PHP_SELF']) ? basename($_SERVER['PHP_SELF']) : '';
+		if ($script !== 'notification.php') {
+			return 0;
+		}
+
+		$codes = array(
+			'WARRANTYSVC_ASSIGNED',
+			'SVCWARRANTY_CREATE',
+		);
+
+		$this->resprints = '<script nonce="'.getNonce().'">';
+		$this->resprints .= 'document.addEventListener("DOMContentLoaded",function(){';
+		$this->resprints .= 'var codes='.json_encode(array_fill_keys($codes, 1)).';';
+		$this->resprints .= 'document.querySelectorAll("table.noborder tr").forEach(function(row){';
+		$this->resprints .= 'var cells=row.cells;if(!cells||cells.length<5){return;}';
+		$this->resprints .= 'var code=(cells[1].textContent||"").trim();';
+		$this->resprints .= 'if(!codes[code]){return;}';
+		$this->resprints .= 'if(!row.querySelector("input[name$=\"_amount\"]")){return;}';
+		$this->resprints .= 'cells[4].innerHTML="<span class=\"opacitymedium\">—</span>";';
+		$this->resprints .= '});';
+		$this->resprints .= '});';
+		$this->resprints .= '</script>';
+
+		return 0;
+	}
+
+	/**
+	 * Add WarrantySvc object types to the standard Dolibarr Email Templates UI.
+	 *
+	 * @param  array       $parameters  Hook parameters
+	 * @param  object      $object      Current object
+	 * @param  string      $action      Current action
+	 * @param  HookManager $hookmanager Hook manager
+	 * @return int                      0 = merge hook results
+	 */
+	public function emailElementlist($parameters, &$object, &$action, $hookmanager)
+	{
+		global $langs, $user;
+
+		if (!isModEnabled('warrantysvc')) {
+			return 0;
+		}
+
+		$langs->load('warrantysvc@warrantysvc');
+		$this->results = array();
+
+		if ($user->hasRight('warrantysvc', 'svcrequest', 'read')) {
+			$this->results['svcrequest'] = img_picto('', 'technic', 'class="pictofixedwidth"').dol_escape_htmltag($langs->trans('MailToSvcRequest'));
+		}
+		if ($user->hasRight('warrantysvc', 'svcwarranty', 'read')) {
+			$this->results['svcwarranty'] = img_picto('', 'bill', 'class="pictofixedwidth"').dol_escape_htmltag($langs->trans('MailToSvcWarranty'));
+		}
+		if ($user->hasRight('warrantysvc', 'supplierrma', 'read')) {
+			$this->results['svcsupplierrma'] = img_picto('', 'tools', 'class="pictofixedwidth"').dol_escape_htmltag($langs->trans('MailToSupplierRma'));
+		}
+		if ($user->hasRight('warrantysvc', 'supplierreturn', 'read')) {
+			$this->results['svcsupplierreturn'] = img_picto('', 'shipment', 'class="pictofixedwidth"').dol_escape_htmltag($langs->trans('MailToSupplierReturn'));
+		}
+
+		return 0;
+	}
+
+	/**
+	 * The core Notification class uses CommonObject::$element to resolve the
+	 * output directory for custom events. WarrantySvc keeps 'svcrequest' and
+	 * 'svcwarranty' as its element names, while Dolibarr creates the module
+	 * output configuration under 'warrantysvc'. Provide lightweight aliases
+	 * only while the notification hook is active; no core patch is required.
+	 *
+	 * @param Conf $conf Dolibarr configuration
+	 * @return void
+	 */
+	private function prepareNotificationObjectConfig($conf)
+	{
+		$baseDir = DOL_DATA_ROOT.'/warrantysvc';
+		$multiDir = array((int) $conf->entity => $baseDir);
+
+		if (isset($conf->warrantysvc) && is_object($conf->warrantysvc)) {
+			if (!empty($conf->warrantysvc->dir_output)) {
+				$baseDir = $conf->warrantysvc->dir_output;
+			}
+			if (!empty($conf->warrantysvc->multidir_output) && is_array($conf->warrantysvc->multidir_output)) {
+				$multiDir = $conf->warrantysvc->multidir_output;
+			} else {
+				$multiDir[(int) $conf->entity] = $baseDir;
+			}
+		}
+
+		foreach (array('svcrequest', 'svcwarranty', 'svcsupplierrma', 'svcsupplierreturn') as $element) {
+			if (!isset($conf->{$element}) || !is_object($conf->{$element})) {
+				$conf->{$element} = new stdClass();
+			}
+			$conf->{$element}->enabled = 1;
+			$conf->{$element}->dir_output = $baseDir;
+			$conf->{$element}->multidir_output = $multiDir;
+		}
+	}
+
 }
