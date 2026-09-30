@@ -14,6 +14,7 @@ if (!$res && file_exists("../../../main.inc.php")) { $res = @include "../../../m
 if (!$res) { die("Include of main fails"); }
 
 require_once DOL_DOCUMENT_ROOT.'/core/class/html.formcompany.class.php';
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.formfile.class.php';
 require_once DOL_DOCUMENT_ROOT.'/product/class/html.formproduct.class.php';
 require_once DOL_DOCUMENT_ROOT.'/product/class/product.class.php';
 require_once DOL_DOCUMENT_ROOT.'/societe/class/societe.class.php';
@@ -71,6 +72,42 @@ function warrantysvc_supplier_return_error($langs, $object)
 	setEventMessages($msg, $object->errors, 'errors');
 }
 
+/**
+ * Refresh the current Supplier Return PDF using the configured Dolibarr model.
+ *
+ * @param SvcSupplierReturn $object Supplier Return
+ * @param Translate $langs Current language
+ * @param Conf $conf Dolibarr config
+ * @param bool $showSuccess Show success message
+ * @return int 1 on success, -1 on failure, 0 when PDF autoupdate is disabled
+ */
+function warrantysvc_supplier_return_refresh_document($object, $langs, $conf, $showSuccess = false)
+{
+	if (getDolGlobalString('MAIN_DISABLE_PDF_AUTOUPDATE')) {
+		return 0;
+	}
+
+	$object->fetch($object->id);
+	$object->fetch_thirdparty();
+
+	$outputlangs = $langs;
+	if (getDolGlobalInt('MAIN_MULTILANGS') && is_object($object->thirdparty) && !empty($object->thirdparty->default_lang)) {
+		$outputlangs = new Translate('', $conf);
+		$outputlangs->setDefaultLang($object->thirdparty->default_lang);
+	}
+
+	$result = $object->generateDocument($object->model_pdf, $outputlangs);
+	if ($result < 0) {
+		setEventMessages($langs->trans('ErrorSupplierReturnDocumentGeneration'), $object->errors, 'warnings');
+		return -1;
+	}
+	if ($showSuccess) {
+		setEventMessages($langs->trans('SupplierReturnDocumentGenerated'), null, 'mesgs');
+	}
+
+	return 1;
+}
+
 /*
  * Actions
  */
@@ -91,6 +128,9 @@ if ($object->id > 0 && $action === 'update' && $permwrite) {
 	$result = $object->update($user);
 	if ($result > 0) {
 		setEventMessages($langs->trans('SupplierReturnUpdated'), null, 'mesgs');
+		if ($object->status === SvcSupplierReturn::STATUS_AUTHORIZED) {
+			warrantysvc_supplier_return_refresh_document($object, $langs, $conf);
+		}
 		header('Location: '.$_SERVER['PHP_SELF'].'?id='.$object->id);
 		exit;
 	}
@@ -113,6 +153,9 @@ if ($object->id > 0 && $action === 'addline' && $permwrite) {
 		$line->reason = GETPOST('line_reason', 'restricthtml');
 		$line->rang = count($object->lines) + 1;
 		if ($line->create($user) > 0) {
+			if ($object->status === SvcSupplierReturn::STATUS_AUTHORIZED) {
+				warrantysvc_supplier_return_refresh_document($object, $langs, $conf);
+			}
 			header('Location: '.$_SERVER['PHP_SELF'].'?id='.$object->id.'#lines');
 			exit;
 		}
@@ -131,6 +174,9 @@ if ($object->id > 0 && $action === 'updateline' && $permwrite) {
 		}
 		$line->reason = GETPOST('line_reason', 'restricthtml');
 		if ($line->update($user) > 0) {
+			if ($object->status === SvcSupplierReturn::STATUS_AUTHORIZED) {
+				warrantysvc_supplier_return_refresh_document($object, $langs, $conf);
+			}
 			header('Location: '.$_SERVER['PHP_SELF'].'?id='.$object->id.'#lines');
 			exit;
 		}
@@ -142,6 +188,9 @@ if ($object->id > 0 && $action === 'deleteline' && $permwrite) {
 	$line = new SvcSupplierReturnLine($db);
 	if ($line->fetch($lineid) > 0 && (int) $line->fk_supplier_return === (int) $object->id) {
 		if ($line->delete($user) > 0) {
+			if ($object->status === SvcSupplierReturn::STATUS_AUTHORIZED) {
+				warrantysvc_supplier_return_refresh_document($object, $langs, $conf);
+			}
 			header('Location: '.$_SERVER['PHP_SELF'].'?id='.$object->id.'#lines');
 			exit;
 		}
@@ -151,13 +200,26 @@ if ($object->id > 0 && $action === 'deleteline' && $permwrite) {
 
 if ($object->id > 0 && $action === 'confirm_authorize' && $confirm === 'yes' && $permwrite) {
 	$result = $object->authorize($user);
-	if ($result < 0) warrantysvc_supplier_return_error($langs, $object);
+	if ($result < 0) {
+		warrantysvc_supplier_return_error($langs, $object);
+	} else {
+		warrantysvc_supplier_return_refresh_document($object, $langs, $conf, true);
+	}
 	header('Location: '.$_SERVER['PHP_SELF'].'?id='.$object->id); exit;
 }
 if ($object->id > 0 && $action === 'confirm_ship' && $confirm === 'yes' && $permwrite) {
 	$result = $object->ship($user);
 	if ($result < 0) warrantysvc_supplier_return_error($langs, $object);
 	else setEventMessages($langs->trans('SupplierReturnStockMovedOut'), null, 'mesgs');
+	header('Location: '.$_SERVER['PHP_SELF'].'?id='.$object->id); exit;
+}
+if ($object->id > 0 && $action === 'confirm_reverse_shipment' && $confirm === 'yes' && $permwrite) {
+	$result = $object->reverseShipment($user, $langs->transnoentitiesnoconv('SupplierReturnReverseAuditNote'));
+	if ($result < 0) {
+		warrantysvc_supplier_return_error($langs, $object);
+	} else {
+		setEventMessages($langs->trans('SupplierReturnStockRestored'), null, 'mesgs');
+	}
 	header('Location: '.$_SERVER['PHP_SELF'].'?id='.$object->id); exit;
 }
 if ($object->id > 0 && $action === 'confirm_close' && $confirm === 'yes' && $permwrite) {
@@ -185,9 +247,26 @@ if ($object->id > 0 && $action === 'confirm_delete' && $confirm === 'yes' && $pe
 	warrantysvc_supplier_return_error($langs, $object);
 }
 
+$supplierReturnCommunicationAllowed = ($object->id > 0
+	&& $permwrite
+	&& in_array($object->status, array(
+		SvcSupplierReturn::STATUS_AUTHORIZED,
+		SvcSupplierReturn::STATUS_SHIPPED,
+		SvcSupplierReturn::STATUS_CLOSED,
+	), true)
+);
+
+// Native Dolibarr document backend.
+if ($object->id > 0) {
+	$upload_dir = warrantysvc_supplier_return_output_root($object);
+	$permissiontoadd = $supplierReturnCommunicationAllowed;
+	include DOL_DOCUMENT_ROOT.'/core/actions_builddoc.inc.php';
+}
+
 // Native Dolibarr email backend.
-if ($object->id > 0 && $permwrite) {
-	$triggersendname = '';
+// actions_sendmails.inc.php fires this only after a successful physical send.
+if ($supplierReturnCommunicationAllowed) {
+	$triggersendname = 'SVCSUPPLIERRETURN_SENTBYMAIL';
 	$autocopy = '';
 	$trackid = 'wsvcsret'.$object->id;
 	include DOL_DOCUMENT_ROOT.'/core/actions_sendmails.inc.php';
@@ -196,6 +275,7 @@ if ($object->id > 0 && $permwrite) {
 $form = new Form($db);
 $formcompany = new FormCompany($db);
 $formproduct = new FormProduct($db);
+$formfile = new FormFile($db);
 
 llxHeader('', $object->id ? $object->ref : $langs->trans('NewSupplierReturn'), '');
 
@@ -234,6 +314,8 @@ if ($action === 'authorize') {
 	$formconfirm = $form->formconfirm($_SERVER['PHP_SELF'].'?id='.$object->id, $langs->trans('SupplierReturnAuthorize'), $langs->trans('ConfirmSupplierReturnAuthorize'), 'confirm_authorize', '', 0, 1);
 } elseif ($action === 'ship') {
 	$formconfirm = $form->formconfirm($_SERVER['PHP_SELF'].'?id='.$object->id, $langs->trans('SupplierReturnShip'), $langs->trans('ConfirmSupplierReturnShip'), 'confirm_ship', '', 0, 1);
+} elseif ($action === 'reverse_shipment') {
+	$formconfirm = $form->formconfirm($_SERVER['PHP_SELF'].'?id='.$object->id, $langs->trans('SupplierReturnReverseShipment'), $langs->trans('ConfirmSupplierReturnReverseShipment'), 'confirm_reverse_shipment', '', 0, 1);
 } elseif ($action === 'close') {
 	$formconfirm = $form->formconfirm($_SERVER['PHP_SELF'].'?id='.$object->id, $langs->trans('SupplierReturnClose'), $langs->trans('ConfirmSupplierReturnClose'), 'confirm_close', '', 0, 1);
 } elseif ($action === 'cancel') {
@@ -243,7 +325,10 @@ if ($action === 'authorize') {
 } elseif ($action === 'rollback') {
 	$formconfirm = $form->formconfirm($_SERVER['PHP_SELF'].'?id='.$object->id, $langs->trans('SupplierReturnRollback'), $langs->trans('ConfirmSupplierReturnRollback'), 'confirm_rollback', '', 0, 1);
 } elseif ($action === 'delete') {
-	$formconfirm = $form->formconfirm($_SERVER['PHP_SELF'].'?id='.$object->id, $langs->trans('DeleteSupplierReturn'), $langs->trans('ConfirmDeleteSupplierReturn', $object->ref), 'confirm_delete', '', 0, 1);
+	$confirmDeleteKey = ($object->status === SvcSupplierReturn::STATUS_REVERSED)
+		? 'ConfirmDeleteReversedSupplierReturn'
+		: 'ConfirmDeleteSupplierReturn';
+	$formconfirm = $form->formconfirm($_SERVER['PHP_SELF'].'?id='.$object->id, $langs->trans('DeleteSupplierReturn'), $langs->trans($confirmDeleteKey, $object->ref), 'confirm_delete', '', 0, 1);
 }
 print $formconfirm;
 
@@ -309,7 +394,7 @@ if ($isEdit) {
 	if ($permwrite && !$supplierReturnStockLocked && in_array($object->status, array(SvcSupplierReturn::STATUS_DRAFT, SvcSupplierReturn::STATUS_AUTHORIZED), true) && $action !== 'presend') {
 		print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=edit&token='.newToken().'">'.$langs->trans('Modify').'</a>';
 	}
-	if ($permwrite && $action !== 'presend') {
+	if ($permwrite && $action !== 'presend' && in_array($object->status, array(SvcSupplierReturn::STATUS_AUTHORIZED, SvcSupplierReturn::STATUS_SHIPPED, SvcSupplierReturn::STATUS_CLOSED), true)) {
 		$mailurl = dolBuildUrl($_SERVER['PHP_SELF'], array('id'=>$object->id, 'action'=>'presend', 'mode'=>'init'), true);
 		foreach (warrantysvc_default_supplier_return_email_receivers($object) as $receiverKey) $mailurl .= '&receiver%5B%5D='.urlencode((string) $receiverKey);
 		$mailurl .= '#formmailbeforetitle';
@@ -317,11 +402,11 @@ if ($isEdit) {
 	}
 	if ($permwrite && $object->status === SvcSupplierReturn::STATUS_DRAFT) print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=authorize&token='.newToken().'">'.$langs->trans('SupplierReturnAuthorize').'</a>';
 	if ($permwrite && $object->status === SvcSupplierReturn::STATUS_AUTHORIZED) print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=ship&token='.newToken().'">'.$langs->trans('SupplierReturnShip').'</a>';
-	if ($permwrite && $object->status === SvcSupplierReturn::STATUS_SHIPPED) print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=close&token='.newToken().'">'.$langs->trans('SupplierReturnClose').'</a>';
+	if ($permwrite && in_array($object->status, array(SvcSupplierReturn::STATUS_SHIPPED, SvcSupplierReturn::STATUS_CLOSED), true)) print '<a class="butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=reverse_shipment&token='.newToken().'">'.$langs->trans('SupplierReturnReverseShipment').'</a>';
 	if ($permwrite && !$supplierReturnStockLocked && in_array($object->status, array(SvcSupplierReturn::STATUS_DRAFT, SvcSupplierReturn::STATUS_AUTHORIZED), true)) print '<a class="butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=cancel&token='.newToken().'">'.$langs->trans('Cancel').'</a>';
-	if ($permwrite && $object->status === SvcSupplierReturn::STATUS_CANCELLED) print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=reopen&token='.newToken().'">'.$langs->trans('Reopen').'</a>';
-	if ($permwrite && (!$supplierReturnStockLocked || $object->status === SvcSupplierReturn::STATUS_CLOSED) && in_array($object->status, array(SvcSupplierReturn::STATUS_AUTHORIZED, SvcSupplierReturn::STATUS_CLOSED), true)) print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=rollback&token='.newToken().'">'.$langs->trans('SupplierReturnRollback').'</a>';
-	if ($permdelete && !$supplierReturnStockLocked) print '<a class="butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=delete&token='.newToken().'">'.$langs->trans('DeleteSupplierReturn').'</a>';
+	if ($permwrite && !$supplierReturnStockLocked && $object->status === SvcSupplierReturn::STATUS_CANCELLED) print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=reopen&token='.newToken().'">'.$langs->trans('Reopen').'</a>';
+	if ($permwrite && !$supplierReturnStockLocked && $object->status === SvcSupplierReturn::STATUS_AUTHORIZED) print '<a class="butAction" href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=rollback&token='.newToken().'">'.$langs->trans('SupplierReturnRollback').'</a>';
+	if ($permdelete && (!$supplierReturnStockLocked || $object->status === SvcSupplierReturn::STATUS_REVERSED)) print '<a class="butActionDelete" href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=delete&token='.newToken().'">'.$langs->trans('DeleteSupplierReturn').'</a>';
 	print '</div>';
 }
 
@@ -487,7 +572,14 @@ foreach ($object->lines as $line) {
 		}
 
 		print '<tr class="oddeven"><td>'.$plabel.'</td><td>'.dol_escape_htmltag($line->batch ?: '—').'</td><td class="right">'.price($line->qty,0,$langs,0,0,-1).'</td><td>'.$reasonHtml.'</td>';
-		print '<td>'.($line->fk_stock_movement_out ? '<a href="'.DOL_URL_ROOT.'/product/stock/movement.php?id='.$line->fk_stock_movement_out.'">#'.$line->fk_stock_movement_out.'</a>' : '—').'</td><td class="right">';
+		$movementHtml = '—';
+		if ($line->fk_stock_movement_out) {
+			$movementHtml = '<a href="'.DOL_URL_ROOT.'/product/stock/movement_list.php?msid='.$line->fk_stock_movement_out.'">#'.$line->fk_stock_movement_out.'</a>';
+			if (!empty($line->fk_stock_movement_reversal)) {
+				$movementHtml .= ' '.$langs->trans('SupplierReturnMovementReversedBy').' <a href="'.DOL_URL_ROOT.'/product/stock/movement_list.php?msid='.$line->fk_stock_movement_reversal.'">#'.$line->fk_stock_movement_reversal.'</a>';
+			}
+		}
+		print '<td>'.$movementHtml.'</td><td class="right">';
 		if ($permwrite && !$supplierReturnStockLocked && in_array($object->status,array(SvcSupplierReturn::STATUS_DRAFT,SvcSupplierReturn::STATUS_AUTHORIZED),true) && empty($line->fk_stock_movement_out)) {
 			print '<a href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=editline&lineid='.$line->id.'#lines">'.img_edit().'</a> ';
 			print '<a href="'.$_SERVER['PHP_SELF'].'?id='.$object->id.'&action=deleteline&lineid='.$line->id.'&token='.newToken().'#lines">'.img_delete().'</a>';
@@ -561,6 +653,40 @@ if ($permwrite && !$supplierReturnStockLocked && in_array($object->status,array(
 }
 print '</table></div>';
 
+// Generated documents, using Dolibarr's standard document widget.
+if ($action !== 'presend' && in_array($object->status, array(SvcSupplierReturn::STATUS_AUTHORIZED, SvcSupplierReturn::STATUS_SHIPPED, SvcSupplierReturn::STATUS_CLOSED), true)) {
+	print '<br><a name="builddoc"></a>';
+	$objref = dol_sanitizeFileName($object->ref);
+	$filedir = warrantysvc_supplier_return_output_dir($object);
+	$urlsource = dolBuildUrl($_SERVER['PHP_SELF'], array('id' => $object->id));
+	$genallowed = $permread;
+	$delallowed = $permwrite;
+	$modelselected = !empty($object->model_pdf) ? $object->model_pdf : 'supplierreturn_standard';
+
+	print $formfile->showdocuments(
+		'warrantysvc:supplierreturn',
+		$objref,
+		$filedir,
+		$urlsource,
+		$genallowed,
+		$delallowed,
+		$modelselected,
+		1,
+		1,
+		0,
+		0,
+		0,
+		'',
+		$langs->trans('GeneratedDocuments'),
+		$langs->trans('Generate'),
+		'',
+		'',
+		$object,
+		0,
+		'remove_file'
+	);
+}
+
 // Lifecycle
 $history = $object->fetchHistory();
 print '<br>'.load_fiche_titre($langs->trans('SupplierReturnLifecycle'), '', 'history');
@@ -571,12 +697,12 @@ foreach ($history as $h) {
 }
 print '</table></div>';
 
-if (GETPOST('modelselected')) $action = 'presend';
-if ($action === 'presend' && $permwrite) {
+if (GETPOST('modelselected') && $supplierReturnCommunicationAllowed) $action = 'presend';
+if ($action === 'presend' && $supplierReturnCommunicationAllowed) {
 	$modelmail = 'svcsupplierreturn';
 	$defaulttopic = 'SupplierReturnEmailSubject';
 	$defaulttopiclang = 'warrantysvc@warrantysvc';
-	$diroutput = warrantysvc_supplier_return_output_dir($object);
+	$diroutput = warrantysvc_supplier_return_output_root($object);
 	$trackid = 'wsvcsret'.$object->id;
 	include DOL_DOCUMENT_ROOT.'/core/tpl/card_presend.tpl.php';
 }
