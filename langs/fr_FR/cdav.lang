@@ -1,0 +1,19 @@
+# Dolibarr language file - Source file is en_US - cdav
+CardDAVurl=URL CardDAV
+CalDAVurl=URL CalDAV
+ICSurl=URL ICS
+URLforICS=Cette URL peut être utilisée avec un client de synchronisation (lecture seule) :
+Full=Complet
+NoLabel=Sans label
+Busy=Occupé
+URLGeneric=Ces URL peuvent être utilisées avec un client de synchronisation CalDAV/CardDAV :
+URLforCardDAV=Si votre client ne détecte pas votre carnet d'adresse cette URL complète peut être précisée :
+URLforCalDAV=Si votre client ne détecte pas vos agendas ces URLs complètes peuvent être précisées :
+DurationEx=Durée (ex: 4H, 3J)
+ActivateDavX5autoURL=Activer la génération de qrcode d'auto configuration pour davx5 ?
+ActivateDavX5autoURLTooltip=Si vous activez cette option un qrcode d'auto-configuration vous sera proposé pour ne pas avoir à saisir toutes les données à la main sur votre smartphone
+URLForDavX5=Configuration automatique pour DavX5
+URLForDavX5Tooltip=Utilisez le logiciel libre <a href="https://github.com/markusfisch/BinaryEye">BinaryEye</a> (dispo sur F-Droid) pour flasher le qrcode et autoconfigurer DavX5 !
+
+EnableMembersSync=Enable members sync
+GenerateAddressbookForMembership=Generate an address book for membership
