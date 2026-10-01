@@ -1,0 +1,12 @@
+## HTTP Auth workaround for php in fastcgi mode
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+<IfModule mod_fastcgi.c>
+	<IfModule mod_rewrite.c>
+		RewriteEngine on
+		RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+	</IfModule>
+	# for Apache 2.4.13 or later
+	<IfVersion >= 2.4.13>
+		CGIPassAuth on
+	</IfVersion>
+</IfModule>
