@@ -4,6 +4,7 @@
 dol_include_once('/completioncertificate/core/modules/completioncertificate/modules_certificate.php');
 require_once DOL_DOCUMENT_ROOT.'/core/lib/pdf.lib.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/company.lib.php';
+require_once DOL_DOCUMENT_ROOT.'/commande/class/commande.class.php';
 
 /**
  * Standard Dolibarr-style PDF model for completion certificates.
@@ -18,6 +19,7 @@ class pdf_standard_certificate extends ModelePDFCertificate
 	public $phpmin = array(8, 1);
 	public $version = 'dolibarr';
 	public $emetteur;
+	public $sourceOrder;
 
 	public $page_largeur;
 	public $page_hauteur;
@@ -60,6 +62,11 @@ class pdf_standard_certificate extends ModelePDFCertificate
 			return -1;
 		}
 
+		$this->sourceOrder = new Commande($this->db);
+		if ($this->sourceOrder->fetch((int) $object->fk_commande) <= 0) {
+			$this->sourceOrder = null;
+		}
+
 		$dirOutput = getMultidirOutput($object, $object->module);
 		if (empty($dirOutput)) {
 			$dirOutput = DOL_DATA_ROOT.'/completioncertificate';
@@ -88,7 +95,7 @@ class pdf_standard_certificate extends ModelePDFCertificate
 		$pdf->setAutoPageBreak(true, 0);
 
 		$showFooterDetails = getDolGlobalInt('MAIN_GENERATE_DOCUMENTS_SHOW_FOOT_DETAILS') ? 1 : 0;
-		$heightForFooter = $this->marge_basse + 18 + ($showFooterDetails ? 6 : 0);
+		$heightForFooter = $this->marge_basse + 8 + ($showFooterDetails ? 6 : 0);
 		$tableWidth = $this->page_largeur - $this->marge_gauche - $this->marge_droite;
 		$qtyWidth = 36;
 		$descWidth = $tableWidth - (2 * $qtyWidth);
@@ -106,73 +113,71 @@ class pdf_standard_certificate extends ModelePDFCertificate
 		}
 
 		$pdf->AddPage();
+		$pdf->setPageOrientation('', true, $heightForFooter);
 		if (!empty($tplidx)) {
 			$pdf->useTemplate($tplidx);
 		}
 
 		$tableY = $this->_pagehead($pdf, $object, $outputlangs);
 		$pdf->SetY($tableY);
-		$this->_tablehead($pdf, $outputlangs);
 
 		$fontSize = pdf_getPDFFontSize($outputlangs) - 1;
 		$pdf->SetFont(pdf_getPDFFont($outputlangs), '', $fontSize);
 
-		foreach ($object->lines as $line) {
-			$description = trim((string) $line->description);
-			$descHeight = max(7.0, (float) $pdf->getStringHeight($descWidth, $description));
-			$rowHeight = max(7.0, $descHeight);
+		if ((int) $object->completion_mode === $object::MODE_PROGRESS) {
+			$this->_writeProgressSummary($pdf, $object, $outputlangs, $fontSize);
+		} else {
+			$this->_tablehead($pdf, $outputlangs);
 
-			if ($pdf->GetY() + $rowHeight > ($this->page_hauteur - $heightForFooter - 5)) {
-				$this->_pagefoot($pdf, $object, $outputlangs, 1);
-				$pdf->AddPage();
-				if (!empty($tplidx)) {
-					$pdf->useTemplate($tplidx);
+			foreach ($object->lines as $line) {
+				$description = trim((string) $line->description);
+				$descHeight = max(7.0, (float) $pdf->getStringHeight($descWidth, $description));
+				$rowHeight = max(7.0, $descHeight);
+
+				if ($pdf->GetY() + $rowHeight > ($this->page_hauteur - $heightForFooter - 5)) {
+					$this->_writePageFooter($pdf, $object, $outputlangs, 1);
+					$pdf->AddPage();
+					$pdf->setPageOrientation('', true, $heightForFooter);
+					if (!empty($tplidx)) {
+						$pdf->useTemplate($tplidx);
+					}
+					$pdf->SetY($this->marge_haute + 5);
+					$this->_tablehead($pdf, $outputlangs);
+					$pdf->SetFont(pdf_getPDFFont($outputlangs), '', $fontSize);
 				}
-				$pdf->SetY($this->marge_haute + 5);
-				$this->_tablehead($pdf, $outputlangs);
-				$pdf->SetFont(pdf_getPDFFont($outputlangs), '', $fontSize);
+
+				$x = $this->marge_gauche;
+				$y = $pdf->GetY();
+
+				$pdf->MultiCell($descWidth, $rowHeight, $outputlangs->convToOutputCharset($description), 1, 'L', false, 0, $x, $y);
+				$pdf->MultiCell($qtyWidth, $rowHeight, price($line->qty_ordered), 1, 'R', false, 0, $x + $descWidth, $y);
+				$pdf->MultiCell($qtyWidth, $rowHeight, price($line->qty_certified), 1, 'R', false, 1, $x + $descWidth + $qtyWidth, $y);
+				$pdf->SetY($y + $rowHeight);
 			}
 
-			$x = $this->marge_gauche;
-			$y = $pdf->GetY();
-
-			$pdf->MultiCell($descWidth, $rowHeight, $outputlangs->convToOutputCharset($description), 1, 'L', false, 0, $x, $y);
-			$pdf->MultiCell($qtyWidth, $rowHeight, price($line->qty_ordered), 1, 'R', false, 0, $x + $descWidth, $y);
-			$pdf->MultiCell($qtyWidth, $rowHeight, price($line->qty_certified), 1, 'R', false, 1, $x + $descWidth + $qtyWidth, $y);
-			$pdf->SetY($y + $rowHeight);
-		}
-
-		if (!empty($object->note_public)) {
-			$pdf->Ln(5);
+			$pdf->Ln(3);
 			$pdf->SetFont(pdf_getPDFFont($outputlangs), 'B', $fontSize);
-			$pdf->MultiCell(0, 5, $outputlangs->transnoentities('NotePublic').':', 0, 'L');
+			$pdf->Cell(0, 5, $outputlangs->transnoentities('CertifiedNetAmount').' : '.price($object->total_ht).' '.$object->currency_code, 0, 1, 'R');
 			$pdf->SetFont(pdf_getPDFFont($outputlangs), '', $fontSize);
-			$pdf->MultiCell(0, 5, trim(strip_tags($object->note_public)), 0, 'L');
 		}
 
-		if ($pdf->GetY() > ($this->page_hauteur - $heightForFooter - 38)) {
-			$this->_pagefoot($pdf, $object, $outputlangs, 1);
-			$pdf->AddPage();
-			if (!empty($tplidx)) {
-				$pdf->useTemplate($tplidx);
-			}
-			$pdf->SetY($this->marge_haute + 15);
-		}
+		// Let the explanatory/acceptance text use the remaining page efficiently.
+		// Only the place/date + signature area is kept together as one visual block.
+		$this->_writeClosingTextBlock($pdf, $object, $outputlangs, $fontSize, $heightForFooter, $tplidx);
 
-		$pdf->Ln(16);
-		$signatureWidth = 70;
-		$gap = 30;
-		$x = ($this->page_largeur - ($signatureWidth * 2 + $gap)) / 2;
-		$y = $pdf->GetY();
+		$signatureBlockHeight = 46;
+		$this->_ensureSpaceForBlock(
+			$pdf,
+			$object,
+			$outputlangs,
+			$signatureBlockHeight,
+			$heightForFooter,
+			$tplidx
+		);
+		$this->_writeSignatureBlock($pdf, $object, $outputlangs, $fontSize);
 
-		$pdf->Line($x, $y + 14, $x + $signatureWidth, $y + 14);
-		$pdf->Line($x + $signatureWidth + $gap, $y + 14, $x + ($signatureWidth * 2) + $gap, $y + 14);
-		$pdf->SetXY($x, $y + 15);
-		$pdf->Cell($signatureWidth, 5, $outputlangs->transnoentities('Contractor'), 0, 0, 'C');
-		$pdf->SetXY($x + $signatureWidth + $gap, $y + 15);
-		$pdf->Cell($signatureWidth, 5, $outputlangs->transnoentities('Customer'), 0, 1, 'C');
-
-		$this->_pagefoot($pdf, $object, $outputlangs, 0);
+		$this->_writePageFooter($pdf, $object, $outputlangs, 0);
+		$this->_applyStatusWatermarkOverlay($pdf, $object, $outputlangs);
 		if (method_exists($pdf, 'AliasNbPages')) {
 			$pdf->AliasNbPages();
 		}
@@ -184,6 +189,32 @@ class pdf_standard_certificate extends ModelePDFCertificate
 		return 1;
 	}
 
+
+	/**
+	 * Draw status watermark after all page content so it stays on the top layer.
+	 */
+	protected function _applyStatusWatermarkOverlay(&$pdf, $object, $outputlangs)
+	{
+		$text = '';
+		if ((int) $object->status === $object::STATUS_DRAFT) {
+			$text = $outputlangs->transnoentities('Draft');
+		} elseif ((int) $object->status === $object::STATUS_CANCELED) {
+			$text = $outputlangs->transnoentities('Canceled');
+		}
+
+		if ($text === '') {
+			return;
+		}
+
+		$pageCount = method_exists($pdf, 'getNumPages') ? (int) $pdf->getNumPages() : 1;
+		for ($page = 1; $page <= $pageCount; $page++) {
+			$pdf->setPage($page);
+			$pdf->setPageOrientation('', true, 0);
+			pdf_watermark($pdf, $outputlangs, $this->page_hauteur, $this->page_largeur, 'mm', $text);
+		}
+	}
+
+
 	protected function _pagehead(&$pdf, $object, $outputlangs)
 	{
 		global $conf;
@@ -192,12 +223,6 @@ class pdf_standard_certificate extends ModelePDFCertificate
 		$defaultFontSize = pdf_getPDFFontSize($outputlangs);
 
 		pdf_pagehead($pdf, $outputlangs, $this->page_hauteur);
-
-		if ((int) $object->status === $object::STATUS_DRAFT) {
-			pdf_watermark($pdf, $outputlangs, $this->page_hauteur, $this->page_largeur, 'mm', $outputlangs->transnoentities('Draft'));
-		} elseif ((int) $object->status === $object::STATUS_CANCELED) {
-			pdf_watermark($pdf, $outputlangs, $this->page_hauteur, $this->page_largeur, 'mm', $outputlangs->transnoentities('Canceled'));
-		}
 
 		$posy = $this->marge_haute;
 		$titleWidth = 105;
@@ -232,26 +257,52 @@ class pdf_standard_certificate extends ModelePDFCertificate
 		$pdf->MultiCell($titleWidth, 5, $outputlangs->transnoentities('Ref').' : '.$object->ref, 0, 'R');
 
 		$pdf->SetFont($font, '', $defaultFontSize - 1);
-		$pdf->SetXY($titleX, $posy + 14);
-		$pdf->MultiCell($titleWidth, 4, $outputlangs->transnoentities('Order').' : '.$object->order_ref, 0, 'R');
-		$pdf->SetXY($titleX, $posy + 19);
-		$pdf->MultiCell($titleWidth, 4, $outputlangs->transnoentities('CompletionDate').' : '.dol_print_date($this->db->jdate($object->date_completion), 'day', false, $outputlangs, true), 0, 'R');
+		$metaY = $posy + 14;
+		$metaY = $this->_writeRightMetaLine($pdf, $titleX, $titleWidth, $metaY, $outputlangs->transnoentities('Order').' : '.$object->order_ref);
 
-		$boxY = max(42, $posy + 30);
+		if (is_object($this->sourceOrder) && !empty($this->sourceOrder->ref_client)) {
+			$metaY = $this->_writeRightMetaLine($pdf, $titleX, $titleWidth, $metaY, $outputlangs->transnoentities('RefCustomerOrder').' : '.$this->sourceOrder->ref_client);
+		}
+		if (is_object($this->sourceOrder) && !empty($this->sourceOrder->date)) {
+			$metaY = $this->_writeRightMetaLine(
+				$pdf,
+				$titleX,
+				$titleWidth,
+				$metaY,
+				$outputlangs->transnoentities('OrderDate').' : '.dol_print_date($this->sourceOrder->date, 'day', false, $outputlangs, true)
+			);
+		}
+		$metaY = $this->_writeRightMetaLine(
+			$pdf,
+			$titleX,
+			$titleWidth,
+			$metaY,
+			$outputlangs->transnoentities('CompletionDate').' : '.dol_print_date($this->db->jdate($object->date_completion), 'day', false, $outputlangs, true)
+		);
+
+		$boxY = max(47, $metaY + 5);
 		$boxWidth = 82;
-		$boxHeight = 34;
+		$boxHeight = 40;
 		$senderX = $this->marge_gauche;
 		$recipientX = $this->page_largeur - $this->marge_droite - $boxWidth;
 
 		$senderAddress = pdf_build_address($outputlangs, $this->emetteur, $object->thirdparty, '', 0, 'source', $object);
 		$recipientAddress = pdf_build_address($outputlangs, $this->emetteur, $object->thirdparty, '', 0, 'target', $object);
 
+		// A completion certificate should identify both parties independently of generic PDF address settings.
+		if (!empty($this->emetteur->tva_intra) && strpos($senderAddress, (string) $this->emetteur->tva_intra) === false) {
+			$senderAddress .= ($senderAddress !== '' ? "\n" : '').$outputlangs->transnoentities('VATIntraShort').': '.$this->emetteur->tva_intra;
+		}
+		if (!empty($object->thirdparty->tva_intra) && strpos($recipientAddress, (string) $object->thirdparty->tva_intra) === false) {
+			$recipientAddress .= ($recipientAddress !== '' ? "\n" : '').$outputlangs->transnoentities('VATIntraShort').': '.$object->thirdparty->tva_intra;
+		}
+
 		$pdf->SetTextColor(0, 0, 0);
 		$pdf->SetFont($font, '', $defaultFontSize - 2);
 		$pdf->SetXY($senderX + 2, $boxY - 5);
-		$pdf->Cell($boxWidth - 4, 4, $outputlangs->transnoentities('ContractorSignature'), 0, 0, 'L');
+		$pdf->Cell($boxWidth - 4, 4, $outputlangs->transnoentities('Contractor'), 0, 0, 'L');
 		$pdf->SetXY($recipientX + 2, $boxY - 5);
-		$pdf->Cell($boxWidth - 4, 4, $outputlangs->transnoentities('CustomerSignature'), 0, 0, 'L');
+		$pdf->Cell($boxWidth - 4, 4, $outputlangs->transnoentities('Customer'), 0, 0, 'L');
 
 		$pdf->SetFillColor(245, 245, 245);
 		$pdf->Rect($senderX, $boxY, $boxWidth, $boxHeight, 'DF');
@@ -278,13 +329,156 @@ class pdf_standard_certificate extends ModelePDFCertificate
 		$pdf->MultiCell(
 			$this->page_largeur - $this->marge_gauche - $this->marge_droite,
 			5,
-			$outputlangs->transnoentities('CompletionCertificateStatement'),
+			$outputlangs->transnoentities('CompletionCertificateIntroStatement'),
 			0,
 			'L'
 		);
 
 		return $pdf->GetY() + 4;
 	}
+
+
+
+	/**
+	 * Write the financial/progress summary for percentage-based certificates.
+	 */
+	protected function _writeProgressSummary(&$pdf, $object, $outputlangs, $fontSize)
+	{
+		$previousProgress = $object->getUsedProgressForOrder((int) $object->fk_commande, (int) $object->id);
+		$cumulativeProgress = min(100.0, $previousProgress + (float) $object->progress_percent);
+		$remainingProgress = max(0.0, 100.0 - $cumulativeProgress);
+
+		$labelWidth = 105;
+		$valueWidth = ($this->page_largeur - $this->marge_gauche - $this->marge_droite) - $labelWidth;
+
+		$pdf->SetFont(pdf_getPDFFont($outputlangs), 'B', $fontSize);
+		$pdf->SetFillColor(235, 235, 235);
+		$pdf->Cell($labelWidth + $valueWidth, 8, $outputlangs->transnoentities('CompletionProgressSummary'), 1, 1, 'L', true);
+		$pdf->SetFont(pdf_getPDFFont($outputlangs), '', $fontSize);
+
+		$rows = array(
+			array($outputlangs->transnoentities('OrderNetAmount'), price($object->order_total_ht).' '.$object->currency_code),
+			array($outputlangs->transnoentities('PreviouslyCertifiedProgress'), price($previousProgress).' %'),
+			array($outputlangs->transnoentities('CurrentProgress'), price($object->progress_percent).' %'),
+			array($outputlangs->transnoentities('CumulativeProgress'), price($cumulativeProgress).' %'),
+			array($outputlangs->transnoentities('RemainingProgress'), price($remainingProgress).' %'),
+			array($outputlangs->transnoentities('CertifiedNetAmount'), price($object->total_ht).' '.$object->currency_code),
+		);
+
+		foreach ($rows as $row) {
+			$pdf->Cell($labelWidth, 7, $row[0], 1, 0, 'L');
+			$pdf->Cell($valueWidth, 7, $row[1], 1, 1, 'R');
+		}
+	}
+
+
+	/**
+	 * Write one right-aligned metadata row using its real rendered height.
+	 */
+	protected function _writeRightMetaLine(&$pdf, $x, $width, $y, $text)
+	{
+		$lineHeight = 4;
+		$height = max($lineHeight, (float) $pdf->getStringHeight($width, $text));
+		$pdf->MultiCell($width, $lineHeight, $text, 0, 'R', false, 1, $x, $y);
+		return max($pdf->GetY(), $y + $height) + 1;
+	}
+
+	/**
+	 * Ensure a visual block fits above the footer. If not, finish the current
+	 * page and continue on a new page using the same Dolibarr page settings.
+	 */
+	protected function _ensureSpaceForBlock(&$pdf, $object, $outputlangs, $requiredHeight, $heightForFooter, $tplidx = 0)
+	{
+		if ($pdf->GetY() + $requiredHeight <= ($this->page_hauteur - $heightForFooter - 2)) {
+			return;
+		}
+
+		$this->_writePageFooter($pdf, $object, $outputlangs, 1);
+		$pdf->AddPage();
+		$pdf->setPageOrientation('', true, $heightForFooter);
+		if (!empty($tplidx)) {
+			$pdf->useTemplate($tplidx);
+		}
+		$pdf->SetY($this->marge_haute + 8);
+	}
+
+	/**
+	 * Write the explanatory/acceptance text. Each paragraph is kept intact when
+	 * practical, but the whole closing section is no longer forced onto one page.
+	 */
+	protected function _writeClosingTextBlock(&$pdf, $object, $outputlangs, $fontSize, $heightForFooter, $tplidx = 0)
+	{
+		$usableWidth = $this->page_largeur - $this->marge_gauche - $this->marge_droite;
+
+		$pdf->SetFont(pdf_getPDFFont($outputlangs), 'B', $fontSize);
+		$heading = $outputlangs->transnoentities('CompletionAcceptance').':';
+		$headingHeight = max(5.0, (float) $pdf->getStringHeight($usableWidth, $heading));
+		$this->_ensureSpaceForBlock($pdf, $object, $outputlangs, 5 + $headingHeight, $heightForFooter, $tplidx);
+		$pdf->Ln(5);
+		$pdf->MultiCell(0, 5, $heading, 0, 'L');
+
+		$pdf->SetFont(pdf_getPDFFont($outputlangs), '', $fontSize);
+		$paragraph = ((int) $object->completion_mode === $object::MODE_PROGRESS)
+			? $outputlangs->transnoentities('CompletionCertificateProgressAcceptanceStatement')
+			: $outputlangs->transnoentities('CompletionCertificateAcceptanceStatement');
+		$paragraphHeight = max(5.0, (float) $pdf->getStringHeight($usableWidth, $paragraph));
+		$this->_ensureSpaceForBlock($pdf, $object, $outputlangs, $paragraphHeight + 2, $heightForFooter, $tplidx);
+		$pdf->MultiCell(0, 5, $paragraph, 0, 'L');
+
+		$pdf->Ln(2);
+		$paragraph = $outputlangs->transnoentities('CompletionCertificateInvoiceStatement');
+		$paragraphHeight = max(5.0, (float) $pdf->getStringHeight($usableWidth, $paragraph));
+		$this->_ensureSpaceForBlock($pdf, $object, $outputlangs, $paragraphHeight + 2, $heightForFooter, $tplidx);
+		$pdf->MultiCell(0, 5, $paragraph, 0, 'L');
+
+		if (!empty($object->note_public)) {
+			$pdf->SetFont(pdf_getPDFFont($outputlangs), 'B', $fontSize);
+			$heading = $outputlangs->transnoentities('CompletionCertificateReservations').':';
+			$headingHeight = max(5.0, (float) $pdf->getStringHeight($usableWidth, $heading));
+			$this->_ensureSpaceForBlock($pdf, $object, $outputlangs, 4 + $headingHeight, $heightForFooter, $tplidx);
+			$pdf->Ln(4);
+			$pdf->MultiCell(0, 5, $heading, 0, 'L');
+
+			$pdf->SetFont(pdf_getPDFFont($outputlangs), '', $fontSize);
+			$note = trim(strip_tags($object->note_public));
+			$noteHeight = max(5.0, (float) $pdf->getStringHeight($usableWidth, $note));
+			if ($noteHeight <= ($this->page_hauteur - $heightForFooter - $this->marge_haute - 20)) {
+				$this->_ensureSpaceForBlock($pdf, $object, $outputlangs, $noteHeight, $heightForFooter, $tplidx);
+			}
+			$pdf->MultiCell(0, 5, $note, 0, 'L');
+		}
+	}
+
+	/**
+	 * Keep place/date and both signature fields together.
+	 */
+	protected function _writeSignatureBlock(&$pdf, $object, $outputlangs, $fontSize)
+	{
+		$pdf->Ln(8);
+		$pdf->SetFont(pdf_getPDFFont($outputlangs), '', $fontSize);
+		$pdf->MultiCell(0, 5, $outputlangs->transnoentities('CompletionCertificatePlaceDate').': '.$outputlangs->convToOutputCharset($object->getIssueText($outputlangs)), 0, 'L');
+
+		$pdf->Ln(8);
+		$signatureWidth = 70;
+		$gap = 30;
+		$x = ($this->page_largeur - ($signatureWidth * 2 + $gap)) / 2;
+		$y = $pdf->GetY();
+
+		$pdf->SetFont(pdf_getPDFFont($outputlangs), 'B', $fontSize);
+		$pdf->SetXY($x, $y);
+		$pdf->Cell($signatureWidth, 5, $outputlangs->transnoentities('OnBehalfOfContractor'), 0, 0, 'C');
+		$pdf->SetXY($x + $signatureWidth + $gap, $y);
+		$pdf->Cell($signatureWidth, 5, $outputlangs->transnoentities('OnBehalfOfCustomer'), 0, 1, 'C');
+
+		$pdf->Line($x, $y + 18, $x + $signatureWidth, $y + 18);
+		$pdf->Line($x + $signatureWidth + $gap, $y + 18, $x + ($signatureWidth * 2) + $gap, $y + 18);
+		$pdf->SetFont(pdf_getPDFFont($outputlangs), '', max(7, $fontSize - 1));
+		$pdf->SetXY($x, $y + 19);
+		$pdf->Cell($signatureWidth, 4, $outputlangs->transnoentities('NamePositionSignature'), 0, 0, 'C');
+		$pdf->SetXY($x + $signatureWidth + $gap, $y + 19);
+		$pdf->Cell($signatureWidth, 4, $outputlangs->transnoentities('NamePositionSignature'), 0, 1, 'C');
+	}
+
 
 	protected function _tablehead(&$pdf, $outputlangs)
 	{
@@ -301,6 +495,19 @@ class pdf_standard_certificate extends ModelePDFCertificate
 		$pdf->Cell($qtyWidth, 8, $outputlangs->transnoentities('OrderedQty'), 1, 0, 'C', true);
 		$pdf->Cell($qtyWidth, 8, $outputlangs->transnoentities('CertifiedQty'), 1, 1, 'C', true);
 	}
+
+
+	/**
+	 * Render the footer exactly like Dolibarr core PDF models: remove the
+	 * automatic bottom break zone on the current page before pdf_pagefoot()
+	 * writes into that reserved area.
+	 */
+	protected function _writePageFooter(&$pdf, $object, $outputlangs, $hidefreetext = 0)
+	{
+		$pdf->setPageOrientation('', true, 0);
+		return $this->_pagefoot($pdf, $object, $outputlangs, $hidefreetext);
+	}
+
 
 	protected function _pagefoot(&$pdf, $object, $outputlangs, $hidefreetext = 0)
 	{

@@ -49,7 +49,7 @@ if ((int) $object->status > 0 && $user->hasRight('completioncertificate', 'write
 	print '</div>';
 }
 
-$sql = 'SELECT rowid, ref, date_completion, status, datec';
+$sql = 'SELECT rowid, ref, completion_mode, progress_percent, total_ht, date_completion, status, datec';
 $sql .= ' FROM '.$db->prefix().'completioncertificate';
 $sql .= ' WHERE entity = '.((int) $conf->entity);
 $sql .= ' AND fk_commande = '.((int) $object->id);
@@ -63,12 +63,16 @@ if (!$resql) {
 	print '<table class="noborder centpercent">';
 	print '<tr class="liste_titre">';
 	print '<td>'.$langs->trans('Ref').'</td>';
+	print '<td>'.$langs->trans('CompletionMode').'</td>';
 	print '<td class="center">'.$langs->trans('CompletionDate').'</td>';
+	print '<td class="right">'.$langs->trans('CertifiedNetAmount').'</td>';
 	print '<td class="center">'.$langs->trans('DateCreation').'</td>';
 	print '<td class="right">'.$langs->trans('Status').'</td>';
 	print '</tr>';
 
 	$count = 0;
+	$totalActive = 0.0;
+	$activeCurrencies = array();
 	while ($row = $db->fetch_object($resql)) {
 		$count++;
 		$certificate = new Certificate($db);
@@ -78,14 +82,40 @@ if (!$resql) {
 
 		print '<tr class="oddeven">';
 		print '<td>'.$certificate->getNomUrl(1).'</td>';
+		print '<td>'.dol_escape_htmltag($certificate->getCompletionModeLabel($langs));
+		if ($certificate->completion_mode === Certificate::MODE_PROGRESS) {
+			print ' <span class="opacitymedium">('.price($certificate->progress_percent).' %)</span>';
+		}
+		print '</td>';
 		print '<td class="center">'.dol_print_date($db->jdate($row->date_completion), 'day').'</td>';
+		print '<td class="right">';
+		if ($certificate->status === Certificate::STATUS_CANCELED) {
+			print '<strike>'.price($certificate->total_ht).' '.dol_escape_htmltag($certificate->currency_code).'</strike>';
+		} else {
+			$totalActive += (float) $certificate->total_ht;
+			if (!empty($certificate->currency_code)) {
+				$activeCurrencies[$certificate->currency_code] = true;
+			}
+			print price($certificate->total_ht).' '.dol_escape_htmltag($certificate->currency_code);
+		}
+		print '</td>';
 		print '<td class="center">'.dol_print_date($db->jdate($row->datec), 'dayhour').'</td>';
-		print '<td class="right">'.$certificate->getLibStatut(5).'</td>';
+		print '<td class="right">'.$certificate->getLibStatut(3).'</td>';
+		print '</tr>';
+	}
+
+	if ($count > 1 && count($activeCurrencies) <= 1) {
+		print '<tr class="liste_total">';
+		print '<td>'.$langs->trans('Total').'</td>';
+		print '<td></td><td></td>';
+		$totalCurrency = count($activeCurrencies) === 1 ? (string) array_key_first($activeCurrencies) : '';
+		print '<td class="right">'.price($totalActive).($totalCurrency !== '' ? ' '.dol_escape_htmltag($totalCurrency) : '').'</td>';
+		print '<td></td><td></td>';
 		print '</tr>';
 	}
 
 	if ($count === 0) {
-		print '<tr class="oddeven"><td colspan="4" class="opacitymedium">'.$langs->trans('NoCompletionCertificates').'</td></tr>';
+		print '<tr class="oddeven"><td colspan="6" class="opacitymedium">'.$langs->trans('NoCompletionCertificates').'</td></tr>';
 	}
 
 	print '</table>';
