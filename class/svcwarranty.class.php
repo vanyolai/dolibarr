@@ -1,0 +1,595 @@
+<?php
+/* Copyright (C) 2026 DPG Supply */
+
+/**
+ * \file    class/svcwarranty.class.php
+ * \ingroup warrantysvc
+ * \brief   Class for customer warranty records
+ */
+
+require_once DOL_DOCUMENT_ROOT.'/core/class/commonobject.class.php';
+
+/**
+ * Class to manage warranty records
+ */
+class SvcWarranty extends CommonObject
+{
+	/** @var string Trigger prefix */
+	public $TRIGGER_PREFIX = 'SVCWARRANTY';
+
+	/** @var string Module name (used by getElementType() for prefixing) */
+	public $module = 'warrantysvc';
+
+	/** @var string Element name */
+	public $element = 'svcwarranty';
+
+	/** @var string Table name without prefix */
+	public $table_element = 'svc_warranty';
+
+	/** @var string Icon */
+	public $picto = 'bill';
+
+	/** @var string Ref field */
+	protected $table_ref_field = 'ref';
+
+	// Status constants
+	const STATUS_ACTIVE   = 'active';
+	const STATUS_EXPIRED  = 'expired';
+	const STATUS_VOIDED   = 'voided';
+
+	public $ref;
+	public $entity;
+	public $fk_product;
+	public $serial_number;
+	public $covered_qty = 1;
+	public $fk_soc;
+	public $socid; // alias
+	public $warranty_type;
+	public $start_date;
+	public $expiry_date;
+	public $coverage_days;
+	public $coverage_months;
+	public $coverage_terms;
+	public $exclusions;
+	public $status = self::STATUS_ACTIVE;
+	public $fk_contract;
+	public $fk_commande;
+	public $fk_expedition;
+	public $fk_expeditiondet;
+	public $claim_count       = 0;
+	public $total_claimed_value = 0;
+	public $date_creation;
+	public $fk_user_creat;
+	public $import_key;
+	public $note_private;
+	public $note_public;
+
+	/**
+	 * Constructor
+	 *
+	 * @param DoliDB $db Database handler
+	 */
+	public function __construct($db)
+	{
+		$this->db = $db;
+	}
+
+	/**
+	 * Void older active warranties for the same concrete serialized unit when
+	 * ownership changes. Product is part of the identity to avoid collisions
+	 * between manufacturers that happen to use the same serial text.
+	 *
+	 * Must be called inside the same transaction as creation of the replacement
+	 * warranty so a failed replacement can never invalidate the historical one.
+	 *
+	 * @return int Number of warranties voided, -1 on database error
+	 */
+	private function voidSupersededSerialWarranties()
+	{
+		if (empty($this->serial_number) || empty($this->fk_product) || empty($this->fk_soc) || empty($this->id)) {
+			return 0;
+		}
+
+		$sql = "UPDATE ".MAIN_DB_PREFIX."svc_warranty";
+		$sql .= " SET status = '".self::STATUS_VOIDED."'";
+		$sql .= " WHERE rowid <> ".((int) $this->id);
+		$sql .= " AND entity = ".((int) $this->entity);
+		$sql .= " AND fk_product = ".((int) $this->fk_product);
+		$sql .= " AND serial_number = '".$this->db->escape($this->serial_number)."'";
+		$sql .= " AND fk_soc <> ".((int) $this->fk_soc);
+		$sql .= " AND status = '".self::STATUS_ACTIVE."'";
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->error = $this->db->lasterror();
+			return -1;
+		}
+
+		return (int) $this->db->affected_rows($resql);
+	}
+
+	/**
+	 * Check whether this shipment item already has a non-voided warranty.
+	 *
+	 * @return int Existing warranty rowid, 0 if free, -1 on database error
+	 */
+	private function findExistingShipmentWarranty()
+	{
+		if (empty($this->fk_expedition)) {
+			return 0;
+		}
+
+		$sql = "SELECT rowid FROM ".MAIN_DB_PREFIX."svc_warranty";
+		$sql .= " WHERE entity = ".((int) $this->entity);
+		$sql .= " AND fk_expedition = ".((int) $this->fk_expedition);
+		$sql .= " AND status <> '".self::STATUS_VOIDED."'";
+
+		if (!empty($this->serial_number)) {
+			$sql .= " AND fk_product = ".((int) $this->fk_product);
+			$sql .= " AND serial_number = '".$this->db->escape($this->serial_number)."'";
+		} elseif (!empty($this->fk_expeditiondet)) {
+			$sql .= " AND fk_expeditiondet = ".((int) $this->fk_expeditiondet);
+			$sql .= " AND (serial_number IS NULL OR serial_number = '')";
+		} else {
+			return 0;
+		}
+
+		$sql .= " LIMIT 1";
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->error = $this->db->lasterror();
+			return -1;
+		}
+
+		$obj = $this->db->fetch_object($resql);
+		return $obj ? (int) $obj->rowid : 0;
+	}
+
+
+	/**
+	 * Create warranty in DB
+	 *
+	 * @param  User $user      User
+	 * @param  int  $notrigger 0=triggers, 1=disable
+	 * @return int             >0 if OK, <0 if KO
+	 */
+	public function create($user, $notrigger = 0)
+	{
+		global $conf, $langs;
+		$langs->loadLangs(array('warrantysvc@warrantysvc'));
+
+		$this->db->begin();
+
+		if (empty($this->ref)) {
+			$this->ref = $this->getNextNumRef();
+			if (empty($this->ref)) {
+				$this->db->rollback();
+				return -1;
+			}
+		}
+
+		$now = dol_now();
+		$this->date_creation = $now;
+		$this->fk_user_creat = $user->id;
+		$this->entity = (int) $conf->entity;
+
+		$existingShipmentWarranty = $this->findExistingShipmentWarranty();
+		if ($existingShipmentWarranty < 0) {
+			$this->db->rollback();
+			return -1;
+		}
+		if ($existingShipmentWarranty > 0) {
+			$this->error = $langs->trans('ErrorDuplicateShipmentWarranty', $existingShipmentWarranty);
+			$this->db->rollback();
+			return -1;
+		}
+
+		if (!empty($this->socid) && empty($this->fk_soc)) {
+			$this->fk_soc = $this->socid;
+		}
+		$this->socid = (int) $this->fk_soc;
+
+		// Auto-compute expiry from coverage_days if not set
+		if (empty($this->expiry_date) && !empty($this->coverage_days) && !empty($this->start_date)) {
+			$this->expiry_date = dol_time_plus_duree($this->start_date, $this->coverage_days, 'd');
+		}
+
+		$sql = "INSERT INTO ".MAIN_DB_PREFIX."svc_warranty";
+		$sql .= " (ref, entity, fk_product, serial_number, covered_qty, fk_soc, warranty_type,";
+		$sql .= "  start_date, expiry_date, coverage_days, coverage_months, coverage_terms, exclusions,";
+		$sql .= "  status, fk_contract, fk_commande, fk_expedition, fk_expeditiondet,";
+		$sql .= "  date_creation, fk_user_creat, import_key, note_private, note_public)";
+		$sql .= " VALUES (";
+		$sql .= "'".$this->db->escape($this->ref)."'";
+		$sql .= ", ".((int) $conf->entity);
+		$sql .= ", ".((int) $this->fk_product);
+		$sql .= ", ".($this->serial_number !== null && $this->serial_number !== '' ? "'".$this->db->escape($this->serial_number)."'" : "NULL");
+		$sql .= ", ".($this->covered_qty > 0 ? price2num($this->covered_qty, 'MT') : "1");
+		$sql .= ", ".((int) $this->fk_soc);
+		$sql .= ", ".($this->warranty_type ? "'".$this->db->escape($this->warranty_type)."'" : "NULL");
+		$sql .= ", '".$this->db->idate($this->start_date)."'";
+		$sql .= ", ".($this->expiry_date ? "'".$this->db->idate($this->expiry_date)."'" : "NULL");
+		$sql .= ", ".($this->coverage_days > 0 ? ((int) $this->coverage_days) : "NULL");
+		$sql .= ", ".($this->coverage_months > 0 ? ((int) $this->coverage_months) : "NULL");
+		$sql .= ", ".($this->coverage_terms ? "'".$this->db->escape($this->coverage_terms)."'" : "NULL");
+		$sql .= ", ".($this->exclusions ? "'".$this->db->escape($this->exclusions)."'" : "NULL");
+		$sql .= ", '".$this->db->escape($this->status ? $this->status : self::STATUS_ACTIVE)."'";
+		$sql .= ", ".($this->fk_contract > 0 ? ((int) $this->fk_contract) : "NULL");
+		$sql .= ", ".($this->fk_commande > 0 ? ((int) $this->fk_commande) : "NULL");
+		$sql .= ", ".($this->fk_expedition > 0 ? ((int) $this->fk_expedition) : "NULL");
+		$sql .= ", ".($this->fk_expeditiondet > 0 ? ((int) $this->fk_expeditiondet) : "NULL");
+		$sql .= ", '".$this->db->idate($this->date_creation)."'";
+		$sql .= ", ".((int) $this->fk_user_creat);
+		$sql .= ", ".($this->import_key ? "'".$this->db->escape($this->import_key)."'" : "NULL");
+		$sql .= ", ".($this->note_private ? "'".$this->db->escape($this->note_private)."'" : "NULL");
+		$sql .= ", ".($this->note_public ? "'".$this->db->escape($this->note_public)."'" : "NULL");
+		$sql .= ")";
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->error = $this->db->lasterror();
+			$this->db->rollback();
+			return -1;
+		}
+
+		$this->id = $this->db->last_insert_id(MAIN_DB_PREFIX.'svc_warranty');
+
+		// If the same serialized unit is sold to a different customer, the
+		// previous active warranty is superseded. Do this only after the new row
+		// exists and within the same transaction.
+		if ($this->voidSupersededSerialWarranties() < 0) {
+			$this->db->rollback();
+			return -1;
+		}
+
+		// Insert extrafields
+		$result = $this->insertExtraFields();
+		if ($result < 0) {
+			$this->db->rollback();
+			return -1;
+		}
+
+		if (!$notrigger) {
+			$this->call_trigger('SVCWARRANTY_CREATE', $user);
+		}
+
+		$this->db->commit();
+		return $this->id;
+	}
+
+	/**
+	 * Load warranty by ID or ref
+	 *
+	 * @param  int    $id  ID
+	 * @param  string $ref Ref
+	 * @return int         >0 if OK, 0 if not found, <0 if KO
+	 */
+	public function fetch($id, $ref = '')
+	{
+		global $conf;
+
+		$sql = "SELECT rowid, ref, entity, fk_product, serial_number, covered_qty, fk_soc,";
+		$sql .= " warranty_type, start_date, expiry_date, coverage_days, coverage_months,";
+		$sql .= " coverage_terms, exclusions, status,";
+		$sql .= " fk_contract, fk_commande, fk_expedition, fk_expeditiondet,";
+		$sql .= " claim_count, total_claimed_value,";
+		$sql .= " date_creation, tms, fk_user_creat,";
+		$sql .= " import_key, note_private, note_public";
+		$sql .= " FROM ".MAIN_DB_PREFIX."svc_warranty";
+		if ($id) {
+			$sql .= " WHERE rowid = ".((int) $id);
+		} elseif ($ref) {
+			$sql .= " WHERE ref = '".$this->db->escape($ref)."' AND entity = ".$conf->entity;
+		} else {
+			return -1;
+		}
+
+		$resql = $this->db->query($sql);
+		if ($resql) {
+			$obj = $this->db->fetch_object($resql);
+			if ($obj) {
+				$this->id                  = $obj->rowid;
+				$this->ref                 = $obj->ref;
+				$this->entity              = $obj->entity;
+				$this->fk_product          = $obj->fk_product;
+				$this->serial_number       = $obj->serial_number;
+				$this->covered_qty         = $obj->covered_qty;
+				$this->fk_soc              = $obj->fk_soc;
+				$this->socid               = $obj->fk_soc;
+				$this->warranty_type       = $obj->warranty_type;
+				$this->start_date          = $this->db->jdate($obj->start_date);
+				$this->expiry_date         = $this->db->jdate($obj->expiry_date);
+				$this->coverage_days       = $obj->coverage_days;
+				$this->coverage_months     = $obj->coverage_months;
+				$this->coverage_terms      = $obj->coverage_terms;
+				$this->exclusions          = $obj->exclusions;
+				$this->status              = $obj->status;
+				$this->fk_contract         = $obj->fk_contract;
+				$this->fk_commande         = $obj->fk_commande;
+				$this->fk_expedition       = $obj->fk_expedition;
+				$this->fk_expeditiondet    = $obj->fk_expeditiondet;
+				$this->claim_count         = $obj->claim_count;
+				$this->total_claimed_value = $obj->total_claimed_value;
+				$this->date_creation       = $this->db->jdate($obj->date_creation);
+				$this->fk_user_creat       = $obj->fk_user_creat;
+				$this->import_key          = $obj->import_key;
+				$this->note_private        = $obj->note_private;
+				$this->note_public         = $obj->note_public;
+
+				// Sync status based on expiry date
+				$this->syncStatus();
+
+				// Fetch extrafields
+				$this->fetch_optionals();
+
+				return 1;
+			}
+			return 0;
+		}
+
+		$this->error = $this->db->lasterror();
+		return -1;
+	}
+
+	/**
+	 * Fetch warranty by serial number
+	 *
+	 * @param  string $serial_number Serial number
+	 * @return int                   >0 if OK, 0 if not found, <0 if KO
+	 */
+	public function fetchBySerial($serial_number)
+	{
+		global $conf;
+
+		$sql = "SELECT rowid FROM ".MAIN_DB_PREFIX."svc_warranty";
+		$sql .= " WHERE serial_number = '".$this->db->escape($serial_number)."'";
+		$sql .= " AND entity = ".$conf->entity;
+		$sql .= " ORDER BY rowid DESC LIMIT 1";
+
+		$resql = $this->db->query($sql);
+		if ($resql) {
+			$obj = $this->db->fetch_object($resql);
+			if ($obj) {
+				return $this->fetch($obj->rowid);
+			}
+			return 0;
+		}
+
+		$this->error = $this->db->lasterror();
+		return -1;
+	}
+
+	/**
+	 * Update warranty in DB
+	 *
+	 * @param  User $user      User
+	 * @param  int  $notrigger 0=triggers, 1=disable
+	 * @return int             >0 if OK, <0 if KO
+	 */
+	public function update($user, $notrigger = 0)
+	{
+		if (!empty($this->socid) && empty($this->fk_soc)) {
+			$this->fk_soc = $this->socid;
+		}
+		$this->socid = (int) $this->fk_soc;
+
+		$sql = "UPDATE ".MAIN_DB_PREFIX."svc_warranty SET";
+		$sql .= " fk_product = ".((int) $this->fk_product);
+		$sql .= ", serial_number = ".($this->serial_number !== null && $this->serial_number !== '' ? "'".$this->db->escape($this->serial_number)."'" : "NULL");
+		$sql .= ", covered_qty = ".($this->covered_qty > 0 ? price2num($this->covered_qty, 'MT') : "1");
+		$sql .= ", fk_soc = ".((int) $this->fk_soc);
+		$sql .= ", warranty_type = ".($this->warranty_type ? "'".$this->db->escape($this->warranty_type)."'" : "NULL");
+		$sql .= ", start_date = '".$this->db->idate($this->start_date)."'";
+		$sql .= ", expiry_date = ".($this->expiry_date ? "'".$this->db->idate($this->expiry_date)."'" : "NULL");
+		$sql .= ", coverage_days = ".($this->coverage_days > 0 ? ((int) $this->coverage_days) : "NULL");
+		$sql .= ", coverage_months = ".($this->coverage_months > 0 ? ((int) $this->coverage_months) : "NULL");
+		$sql .= ", coverage_terms = ".($this->coverage_terms ? "'".$this->db->escape($this->coverage_terms)."'" : "NULL");
+		$sql .= ", exclusions = ".($this->exclusions ? "'".$this->db->escape($this->exclusions)."'" : "NULL");
+		$sql .= ", status = '".$this->db->escape($this->status)."'";
+		$sql .= ", fk_contract = ".($this->fk_contract > 0 ? ((int) $this->fk_contract) : "NULL");
+		$sql .= ", fk_commande = ".($this->fk_commande > 0 ? ((int) $this->fk_commande) : "NULL");
+		$sql .= ", fk_expedition = ".($this->fk_expedition > 0 ? ((int) $this->fk_expedition) : "NULL");
+		$sql .= ", fk_expeditiondet = ".($this->fk_expeditiondet > 0 ? ((int) $this->fk_expeditiondet) : "NULL");
+		$sql .= ", claim_count = ".((int) $this->claim_count);
+		$sql .= ", total_claimed_value = ".((float) $this->total_claimed_value);
+		$sql .= ", note_private = ".($this->note_private ? "'".$this->db->escape($this->note_private)."'" : "NULL");
+		$sql .= ", note_public = ".($this->note_public ? "'".$this->db->escape($this->note_public)."'" : "NULL");
+		$sql .= " WHERE rowid = ".((int) $this->id);
+
+		$resql = $this->db->query($sql);
+		if ($resql) {
+			// Update extrafields
+			$this->insertExtraFields();
+
+			if (!$notrigger) {
+				$this->call_trigger('SVCWARRANTY_MODIFY', $user);
+			}
+			return 1;
+		}
+
+		$this->error = $this->db->lasterror();
+		return -1;
+	}
+
+	/**
+	 * Delete warranty
+	 *
+	 * @param  User $user User
+	 * @return int        >0 if OK, <0 if KO
+	 */
+	public function delete($user)
+	{
+		$this->db->begin();
+
+		// Remove element_element links (both prefixed and bare type names)
+		$this->deleteObjectLinked();
+
+		// Remove extrafields
+		$this->deleteExtraFields();
+
+		$sql = "DELETE FROM ".MAIN_DB_PREFIX."svc_warranty WHERE rowid = ".((int) $this->id);
+		if (!$this->db->query($sql)) {
+			$this->error = $this->db->lasterror();
+			$this->db->rollback();
+			return -1;
+		}
+
+		$this->db->commit();
+		return 1;
+	}
+
+	/**
+	 * Return a clickable link to this warranty (used by showLinkedObjectBlock)
+	 *
+	 * @param  int    $withpicto  0=no picto, 1=include picto
+	 * @param  string $option     Unused
+	 * @param  int    $notooltip  1=disable tooltip
+	 * @return string             HTML link
+	 */
+	public function getNomUrl($withpicto = 0, $option = '', $notooltip = 0)
+	{
+		$url = DOL_URL_ROOT.'/custom/warrantysvc/warranty_card.php?id='.$this->id;
+		$label = $this->ref;
+		$link = '<a href="'.$url.'" title="'.dol_escape_htmltag($label).'">';
+		$linkend = '</a>';
+		$result = $link;
+		if ($withpicto) {
+			$result .= img_picto('', 'bill', 'class="pictofixedwidth"');
+		}
+		$result .= $label.$linkend;
+		return $result;
+	}
+
+	/**
+	 * Return the effective warranty status at a given date.
+	 *
+	 * "expired" is derived from expiry_date; "voided" is the only stored status
+	 * that always wins. This keeps historical rows consistent even when their
+	 * database status was originally created as "active".
+	 *
+	 * @param int|null $atDate Date to evaluate, defaults to now
+	 * @return string One of STATUS_ACTIVE, STATUS_EXPIRED, STATUS_VOIDED
+	 */
+	public function getStatusAt($atDate = null)
+	{
+		if ($this->status == self::STATUS_VOIDED) {
+			return self::STATUS_VOIDED;
+		}
+
+		$atDate = !empty($atDate) ? (int) $atDate : dol_now();
+		$atDay = dol_print_date($atDate, '%Y-%m-%d', 'tzserver');
+		$expiryDay = !empty($this->expiry_date) ? dol_print_date($this->expiry_date, '%Y-%m-%d', 'tzserver') : '';
+
+		if ($expiryDay !== '' && $expiryDay < $atDay) {
+			return self::STATUS_EXPIRED;
+		}
+
+		return self::STATUS_ACTIVE;
+	}
+
+	/**
+	 * Sync the in-memory status from expiry date after fetch.
+	 *
+	 * @return void
+	 */
+	private function syncStatus()
+	{
+		$this->status = $this->getStatusAt();
+	}
+
+	/**
+	 * Get next ref
+	 *
+	 * @return string Next ref
+	 */
+	public function getNextNumRef()
+	{
+		global $conf;
+		$year = dol_print_date(dol_now(), '%Y');
+		$month = dol_print_date(dol_now(), '%m');
+		$prefix = 'WTY-'.$year.$month.'-';
+		$counterPosition = strlen($prefix) + 1;
+
+		// Keep the counter extraction aligned with the actual reference prefix.
+		// The previous hard-coded offset (15) only read the final digit of
+		// WTY-YYYYMM-NNNN and started reusing references after 0009.
+		$sql = "SELECT MAX(CAST(SUBSTRING(ref FROM ".$counterPosition.") AS SIGNED)) as max";
+		$sql .= " FROM ".MAIN_DB_PREFIX."svc_warranty";
+		$sql .= " WHERE ref LIKE '".$this->db->escape($prefix)."%' AND entity = ".((int) $conf->entity);
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->error = $this->db->lasterror();
+			return '';
+		}
+
+		$max = 0;
+		$obj = $this->db->fetch_object($resql);
+		if ($obj) {
+			$max = (int) $obj->max;
+		}
+
+		return $prefix.sprintf('%04d', $max + 1);
+	}
+
+	/**
+	 * Return status label using Dolibarr's native status renderer.
+	 *
+	 * @param  int $mode 0=long label, 1=short label, 2=picto + short label, 3=picto,
+	 *                  4=picto + long label, 5=short label + picto, 6=long label + picto
+	 * @return string    Label
+	 */
+	public function getLibStatut($mode = 0)
+	{
+		return $this->LibStatut($this->status, $mode);
+	}
+
+	/**
+	 * Return status label using Dolibarr's native status renderer.
+	 *
+	 * @param  string $status Status value
+	 * @param  int    $mode   Dolibarr status display mode
+	 * @return string         Label
+	 */
+	public function LibStatut($status = '', $mode = 0)
+	{
+		global $langs;
+		$langs->load('warrantysvc');
+
+		if (empty($status)) {
+			$status = $this->status;
+		}
+
+		$labels = array(
+			self::STATUS_ACTIVE  => array('label' => 'SvcActive',  'status' => 'status4'),
+			self::STATUS_EXPIRED => array('label' => 'SvcExpired', 'status' => 'status8'),
+			self::STATUS_VOIDED  => array('label' => 'SvcVoided',  'status' => 'status9'),
+		);
+
+		$s = isset($labels[$status]) ? $labels[$status] : array('label' => 'Unknown', 'status' => 'status0');
+		$label = $langs->transnoentitiesnoconv($s['label']);
+
+		return dolGetStatus($label, $label, '', $s['status'], $mode);
+	}
+
+	/**
+	 * Count warranties for a given third party (used by tab badge).
+	 *
+	 * @param  int $socid Third party ID
+	 * @return int        Number of warranties
+	 */
+	public static function countForThirdparty($socid)
+	{
+		global $db, $conf;
+
+		$sql = "SELECT COUNT(*) as nb FROM ".MAIN_DB_PREFIX."svc_warranty";
+		$sql .= " WHERE fk_soc = ".((int) $socid);
+		$sql .= " AND entity IN (".getEntity('svcwarranty').")";
+		$resql = $db->query($sql);
+		if ($resql) {
+			$obj = $db->fetch_object($resql);
+			return (int) $obj->nb;
+		}
+		return 0;
+	}
+}
