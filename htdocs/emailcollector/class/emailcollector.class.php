@@ -1799,12 +1799,12 @@ class EmailCollector extends CommonObject
 				}
 
 				$f = $client->getFolders(false, $tmpsourcedir);	// Note the search of directory do a search on sourcedir*
-				if ($f) {
+				if (count($f) > 0) {
 					// getFolders does a sourcedir* match so INBOX also returns INBOX.Traites
 					// etc. Pick the folder whose full_name matches the requested source
 					// before falling back to the first result, otherwise polling can land
 					// on an empty subfolder instead of INBOX (#37357).
-					$folder = $f[0];
+					$folder = $f->first();
 					foreach ($f as $candidate) {
 						if ($candidate instanceof Webklex\PHPIMAP\Folder && $candidate->full_name === $tmpsourcedir) {
 							$folder = $candidate;
@@ -1815,11 +1815,10 @@ class EmailCollector extends CommonObject
 						$Query = $folder->messages()->where($criteria); // @phan-suppress-current-line PhanPluginUnknownObjectMethodCall
 					}
 				} else {
-					$error++;
-					$this->error = "Failed to execute getfolders";
-					$this->errors[] = $this->error;
-					dol_syslog("EmailCollector::doCollectOneCollector ".$this->error, LOG_ERR);
-					return -1;
+					// Some IMAP servers allow selecting a mailbox directly even when LIST with
+					// the same mailbox name as a pattern returns no result.
+					$client->openFolder($tmpsourcedir);
+					$Query = (new Webklex\PHPIMAP\Query\WhereQuery($client, $charset))->where($criteria);
 				}
 			} catch (InvalidWhereQueryCriteriaException $e) {
 				$this->error = $e->getMessage();
