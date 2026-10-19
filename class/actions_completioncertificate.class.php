@@ -73,4 +73,79 @@ class ActionsCompletionCertificate extends CommonHookActions
 	}
 
 
+	/**
+	 * Automatically attach the generated completion-certificate PDF when the
+	 * native Dolibarr mail composer is initialized or a mail template is applied.
+	 *
+	 * The hook runs after FormMail clears its attachment session, so this is the
+	 * correct extension point for adding the module's main document.
+	 *
+	 * @param array<string,mixed> $parameters Hook parameters
+	 * @param FormMail $object Native mail form object
+	 * @param string $action Current action
+	 * @param HookManager $hookmanager Hook manager
+	 * @return int
+	 */
+	public function getFormMail($parameters, &$object, &$action, $hookmanager)
+	{
+		global $langs;
+
+		$trackid = (string) ($parameters['trackid'] ?? '');
+		if (!preg_match('/^completioncertificate([0-9]+)$/', $trackid, $matches)) {
+			return 0;
+		}
+
+		$isInitialOpen = (GETPOST('mode', 'alpha') === 'init');
+		$isTemplateChange = (
+			GETPOST('modelselected')
+			&& GETPOST('modelmailselected', 'alpha') !== ''
+			&& GETPOST('modelmailselected', 'alpha') !== '-1'
+		);
+		if (!$isInitialOpen && !$isTemplateChange) {
+			return 0;
+		}
+
+		if (!is_object($object) || !method_exists($object, 'add_attached_files')) {
+			return 0;
+		}
+
+		dol_include_once('/completioncertificate/class/certificate.class.php');
+
+		$certificate = new Certificate($this->db);
+		if ($certificate->fetch((int) $matches[1]) <= 0) {
+			return 0;
+		}
+		if ((int) $certificate->status !== Certificate::STATUS_VALIDATED) {
+			return 0;
+		}
+
+		$objref = dol_sanitizeFileName($certificate->ref);
+		$baseOutput = getMultidirOutput($certificate, $certificate->module);
+		if (empty($baseOutput)) {
+			$baseOutput = DOL_DATA_ROOT.'/completioncertificate';
+		}
+
+		$pdfPath = $baseOutput.'/'.$certificate->element.'/'.$objref.'/'.$objref.'.pdf';
+
+		// Normally validation already generated the PDF. Regenerate only if the
+		// main document is unexpectedly missing.
+		if (!is_readable($pdfPath)) {
+			$certificate->fetch_thirdparty();
+			$result = $certificate->generateDocument(
+				$certificate->model_pdf ?: 'standard_certificate',
+				$langs
+			);
+			if ($result <= 0) {
+				return 0;
+			}
+		}
+
+		if (is_readable($pdfPath)) {
+			$object->add_attached_files($pdfPath, basename($pdfPath), 'application/pdf');
+		}
+
+		return 0;
+	}
+
+
 }
