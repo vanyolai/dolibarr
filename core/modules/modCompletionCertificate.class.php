@@ -24,7 +24,7 @@ class modCompletionCertificate extends DolibarrModules
 		$this->description = 'ModuleCompletionCertificateDesc';
 		$this->editor_name = 'Krisztian Vanyolai';
 		$this->editor_url = 'https://github.com/vanyolai/dolibarr-completioncertificate';
-		$this->version = '0.5.5';
+		$this->version = '0.5.6';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'check-circle';
 
@@ -40,7 +40,7 @@ class modCompletionCertificate extends DolibarrModules
 			'theme' => 0,
 			'css' => array(),
 			'js' => array(),
-			'hooks' => array('ordercard', 'emailtemplates'),
+			'hooks' => array('ordercard', 'emailtemplates', 'formmail'),
 			'moduleforexternal' => 0,
 		);
 
