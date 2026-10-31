@@ -354,13 +354,15 @@ class pdf_cyan_noid extends ModelePDFPropales
 
 				$save_note_public = $object->note_public;	// Because $object->note_public may be modified by _pagehead() that calls pdf_writeLinkedObjects() that calls ... that modify $object->note_private
 
-				$top_shift = $this->_pagehead($pdf, $object, 1, $outputlangs, $outputlangsbis);
+				$pagehead = $this->_pagehead($pdf, $object, 1, $outputlangs, $outputlangsbis);
+				$top_shift = $pagehead['top_shift'];
+				$shipp_shift = $pagehead['shipp_shift'];
 				$pdf->SetFont('', '', $default_font_size - 1);
 				$pdf->MultiCell(0, 3, ''); // Set interline to 3
 				$pdf->SetTextColor(0, 0, 0);
 
 
-				$tab_top = 90 + $top_shift;
+				$tab_top = 90 + $top_shift + $shipp_shift;
 				$tab_top_newpage = (!getDolGlobalInt('MAIN_PDF_DONOTREPEAT_HEAD') ? 42 + $top_shift : 10);
 				if (!$hidetop && getDolGlobalInt('MAIN_PDF_ENABLE_COL_HEAD_TITLE_REPEAT')) {
 					// TODO : make this hidden conf the default behavior for each PDF when each PDF managed this new Display
@@ -569,6 +571,7 @@ class pdf_cyan_noid extends ModelePDFPropales
 				$pdf_sub_options = array();
 				$pdf_sub_options['titleshowuponpdf'] = 1;
 				$pdf_sub_options['titleshowtotalexludingvatonpdf'] = 1;
+				$pdf_sub_options_before_title = array();	// Options in use before each title line, by level
 
 				$hidenextline = 0;
 
@@ -580,6 +583,10 @@ class pdf_cyan_noid extends ModelePDFPropales
 
 					if ($object->lines[$i]->special_code == SUBTOTALS_SPECIAL_CODE) {
 						$level = $object->lines[$i]->qty;
+						// Keep the options in use before a title line, to restore them after the subtotal line that closes its block
+						if ($level > 0 && !isset($pdf_sub_options_before_title[(int) $level])) {
+							$pdf_sub_options_before_title[(int) $level] = $pdf_sub_options;
+						}
 						if ($sub_options) {
 							$hidenextline = 0;
 							if (isset($sub_options['titleshowuponpdf'])) {
@@ -598,6 +605,15 @@ class pdf_cyan_noid extends ModelePDFPropales
 							}
 							if (isset($pdf_sub_options['titleshowtotalexludingvatonpdf']) && abs($level) <= $pdf_sub_options['titleshowtotalexludingvatonpdf']) {
 								unset($pdf_sub_options['titleshowtotalexludingvatonpdf']);
+							}
+						}
+						// A subtotal line closes the block of the title line of same level: the next lines get back the options in use before this title line
+						if ($level < 0 && isset($pdf_sub_options_before_title[(int) abs($level)])) {
+							$pdf_sub_options = $pdf_sub_options_before_title[(int) abs($level)];
+							foreach (array_keys($pdf_sub_options_before_title) as $tmplevel) {
+								if ($tmplevel >= abs($level)) {
+									unset($pdf_sub_options_before_title[$tmplevel]);
+								}
 							}
 						}
 					}
@@ -756,7 +772,7 @@ class pdf_cyan_noid extends ModelePDFPropales
 						}
 
 						// Total with tax line (TTC)
-						if ($this->getColumnStatus('totalincltax')) {
+						if ($this->getColumnStatus('totalincltax') && $object->lines[$i]->special_code != SUBTOTALS_SPECIAL_CODE) {
 							$total_incl_tax = pdf_getlinetotalwithtax($object, $i, $outputlangs, $hidedetails);
 							$this->printStdColumnContent($pdf, $curY, 'totalincltax', $total_incl_tax);
 						}
@@ -1702,7 +1718,7 @@ class pdf_cyan_noid extends ModelePDFPropales
 	 *  @param  int<0,1>   	$showaddress    0=no, 1=yes
 	 *  @param  Translate	$outputlangs	Object lang for output
 	 *  @param  ?Translate	$outputlangsbis	Object lang for output bis
-	 *  @return	float|int                   Return topshift value
+	 *  @return	array{top_shift:float|int,shipp_shift:float|int}	Height added by linked objects lines and by the shipping address frame
 	 */
 	protected function _pagehead(&$pdf, $object, $showaddress, $outputlangs, $outputlangsbis = null)
 	{
@@ -1801,6 +1817,7 @@ class pdf_cyan_noid extends ModelePDFPropales
 				$pdf->SetXY($posx, $posy);
 				$pdf->SetTextColor(0, 0, 60);
 				$pdf->MultiCell($w, 3, $outputlangs->transnoentities("Project")." : ".(empty($object->project->title) ? '' : $object->project->title), '', 'R');
+				$posy = $pdf->getY();
 			}
 		}
 
@@ -2027,7 +2044,8 @@ class pdf_cyan_noid extends ModelePDFPropales
 			}
 		}
 		$pdf->SetTextColor(0, 0, 0);
-		return $shipp_shift;
+
+		return array('top_shift' => $top_shift, 'shipp_shift' => $shipp_shift);
 	}
 
 	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.PublicUnderscore
