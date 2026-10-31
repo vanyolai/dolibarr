@@ -481,6 +481,11 @@ PDF acceptance should cover:
 - regeneration behavior;
 - layer ordering.
 
+After every upstream update, review custom PDF drift using
+`docs/VANYOLAI_PDF_MODELS.md`. Run
+`python3 dev/tools/test/check_cyan_noid_sync.py` for the copied Cyan NoID model;
+Nautilus inherits the Espadon header and contact fixes directly.
+
 ## 23. Linked objects
 
 Use native related-object facilities and correct Dolibarr element names.

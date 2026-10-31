@@ -29,6 +29,22 @@ Repository policy:
 git config pull.ff only
 ```
 
+## Latest integration checkpoint (2026-10-31)
+
+- Official Dolibarr `23.0` baseline: `6b461ab5bd5`, integrated in production
+  by `a1443b5bcd5`.
+- Cyan NoID synchronization: source commit `510e5f4dbe` on
+  `fix/custom-pdf-upstream-23`, included in the production integration carrying
+  this checkpoint. Product references remain hidden.
+- Both Nautilus variants inherit the relevant Espadon header/contact fixes;
+  module subtrees and versions were not changed by this integration.
+- Source/drift checks and PHP 8.3 syntax checks passed. Live deployment is
+  authorized but unconfirmed; generated-PDF visual acceptance is pending.
+- Details and rollout commands: `docs/VANYOLAI_PDF_MODELS.md`.
+- After future upstream integrations run
+  `python3 dev/tools/test/check_cyan_noid_sync.py`; this is a manual checker,
+  not an automatic background task.
+
 ## Before changing anything
 
 1. Inspect current GitHub branch/PR/CI state.
