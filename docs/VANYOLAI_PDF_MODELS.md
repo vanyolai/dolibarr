@@ -2,6 +2,39 @@
 
 Reviewed against Dolibarr `23.0` commit `6b461ab5bd5` on 2026-10-31.
 
+## Integration and deployment state (2026-10-31)
+
+| Layer | Recorded state |
+| --- | --- |
+| Upstream baseline | Official `23.0` through `6b461ab5bd5`; integrated in `production` by `a1443b5bcd5`. |
+| Custom PDF implementation | Commit `510e5f4dbe` on `fix/custom-pdf-upstream-23`; included in the production integration carrying this status update. |
+| Module subtrees | No module snapshot, version or subtree topology changes in this PDF integration. |
+| Checks | Source synchronization, drift-checker failure cases, PHP 8.3 syntax and whitespace checks passed. |
+| Live checkout | Deployment to `/mnt/applications/data/production/dolibarr` is authorized, but not confirmed until the operator reports the update result. |
+| PDF acceptance | Database-backed generation and visual checks are still pending; code checks are not visual acceptance. |
+
+The user authorized production integration and local rollout on 2026-10-31,
+with the pending PDF checks explicitly recorded. This does not mark those
+checks as passed.
+
+Update the clean live checkout from `production` with a fast-forward only:
+
+```bash
+cd /mnt/applications/data/production/dolibarr
+git status -sb
+git fetch origin --prune
+git switch production
+git merge --ff-only origin/production
+python3 dev/tools/test/check_cyan_noid_sync.py
+git status -sb
+git log -3 --oneline
+```
+
+Stop and investigate any dirty checkout, failed fast-forward or failed checker.
+Regenerate representative PDFs after the update; existing PDF files do not
+change when the PHP template is updated. Record the deployed commit and visual
+results after the operator supplies evidence.
+
 ## Cyan NoID proposal model
 
 `htdocs/core/modules/propale/doc/pdf_cyan_noid.modules.php` is a copy of the
